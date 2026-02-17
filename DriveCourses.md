@@ -1,0 +1,501 @@
+# Platzi Courses (Drive Scan)
+
+**Total Courses found:** 497
+
+- Audio Curso de Inglés para Viajes
+- Audio Curso de Inglés para el Uso de Preposiciones
+- Audio Historia en Inglés Atrapados en la Tecnología
+- Audio Historia en Inglés Misterios sin Resolver
+- Audio Historia en Inglés Origen del idioma
+- Audio Historia en Inglés Una Aventura en la Ciudad
+- Audiocurso Glosario de Términos de Diseño
+- Audiocurso de Frameworks y Arquitecturas Frontend Casos de Estudio
+- Audiocurso de Fundamentos de Arquitectura de Alta Concurrencia
+- Audiocurso de Salidas Profesionales para Desarrolladores de Aplicaciones Móviles 2022
+- Curso AWS Cloud Practitioner Certification
+- Curso Avanzado de Automatización de Pruebas con Puppeteer
+- Curso Avanzado de Escritura en Inglés
+- Curso Avanzado de Java SE
+- Curso Avanzado de Node.js con GraphQL, Apollo Server y Prisma
+- Curso Avanzado de Pronunciación en Inglés
+- Curso Avanzado de Serverless Framework en AWS
+- Curso Avanzado de Vocabulario y Expresiones en Inglés
+- Curso Avanzado de Vue.js 2
+- Curso Básico de Computadores e Informática
+- Curso Básico de Cálculo Diferencial para Data Science e Inteligencia Artificial
+- Curso Básico de Diseño de Interfaces con Android Studio
+- Curso Básico de Escritura en Inglés
+- Curso Básico de Programación Orientada a Objetos con JavaScript
+- Curso Básico de Programación con C#
+- Curso Básico de Programación en Go
+- Curso Básico de Pronunciación en Inglés
+- Curso Básico de Testing con PHP y Laravel
+- Curso Básico de Testing en Java
+- Curso Básico de Vocabulario y
+- Curso Básico de Vocabulario y Expresiones en Inglés
+- Curso Básico de Vue.js 2
+- Curso Gratis de Estrategias para Aprender Inglés en Línea
+- Curso Gratis de Introducción a la Inteligencia Artificial
+- Curso Gratis de Lovable para Crear Páginas Web sin Programar
+- Curso Gratis de Programación Básica
+- Curso Gratis para Crear Agentes de AI con Copilot Studio
+- Curso Intermedio de Escritura en Inglés
+- Curso Intermedio de Programación Orientada a Objetos en JavaScript
+- Curso Intermedio de Pronunciación en Inglés
+- Curso Intermedio de Ruby on Rails
+- Curso Intermedio de Vocabulario y Expresiones en Inglés
+- Curso PowerBI Avanzado
+- Curso Profesional de Arquitectura de Software
+- Curso Profesional de CSS Grid Layout
+- Curso Profesional de DevOps
+- Curso Profesional de Machine Learning con scikit-learn
+- Curso Profesional de React.js y Redux
+- Curso Profesional de Redes Neuronales con TensorFlow
+- Curso Práctico de AWS Cómputo con EC2
+- Curso Práctico de AWS Roles y Seguridad con IAM
+- Curso Práctico de Angular Construye un Clon de Trello
+- Curso Práctico de Arquitectura Backend
+- Curso Práctico de Backend con Node.js
+- Curso Práctico de Bases de Datos en AWS
+- Curso Práctico de C++
+- Curso Práctico de COBOL
+- Curso Práctico de Frontend Developer
+- Curso Práctico de HTML y CSS
+- Curso Práctico de Maquetación en CSS
+- Curso Práctico de Python Creación de un CRUD
+- Curso Práctico de Storage en AWS
+- Curso Práctico de Symfony
+- Curso Práctico de Vue.js
+- Curso de  Serverless Framework en AWS
+- Curso de AI para SEO
+- Curso de API First
+- Curso de API REST con Javascript Ejemplos con APIs reales
+- Curso de API REST con Javascript Fundamentos
+- Curso de API REST con Javascript Performance y Usabilidad
+- Curso de API REST con Laravel
+- Curso de API REST con PHP
+- Curso de AWS Redshift para Manejo de Big Data
+- Curso de Accesibilidad Web
+- Curso de Administración de Servidores Linux Manejo de Recursos
+- Curso de Adobe XD
+- Curso de Agentes AI
+- Curso de Algoritmos de Clasificación de Texto
+- Curso de Almacenamiento en Azure
+- Curso de Almacenamiento en la Nube con Google Cloud Platform
+- Curso de Amazon DynamoDB
+- Curso de Android Despliegue a Google Play Store
+- Curso de Android Integración de APIs nativas
+- Curso de Android Modo Offline
+- Curso de Angular Avanzado
+- Curso de Angular Componentes y Servicios
+- Curso de Angular Creación de Aplicaciones Web
+- Curso de Angular Forms Creación y Optimización de Formularios Web
+- Curso de Angular Router Lazy Loading y Programación Modular
+- Curso de Angular Unit Testing para Componentes
+- Curso de Angular Unit Testing para Formularios
+- Curso de Angular Unit Testing para Rutas
+- Curso de Angular Unit Testing para Servicios
+- Curso de Animaciones con CSS
+- Curso de Análisis Exploratorio de Datos
+- Curso de Análisis de Malware para Dispositivos Móviles
+- Curso de Aplicaciones en Tiempo Real con Socket.io
+- Curso de App Mobile utilizando Woocommerce
+- Curso de Arquitecturas CSS
+- Curso de Arquitecturas Limpias para Desarrollo de Software
+- Curso de Asincronismo con JavaScript
+- Curso de Autenticación con Angular
+- Curso de Auth0 Implementación de Autenticación y Seguridad Web
+- Curso de Automatizaciones con n8n
+- Curso de Automatización de Pruebas UI con Cypress
+- Curso de Automatización de Pruebas con Puppeteer
+- Curso de Automatización de Pruebas de Backend con Cypress
+- Curso de Automatización de Test con Playwright
+- Curso de Azure Active Directory
+- Curso de Azure Cache para Redis
+- Curso de Azure DevOps Flujos de CICD
+- Curso de Azure IaaS
+- Curso de Backend con ExpressJS
+- Curso de Backend con NestJS
+- Curso de Backend con Node.js Autenticación con Passport.js y JWT
+- Curso de Backend con Node.js Base de Datos con PostgreSQL
+- Curso de Base de Datos NoSQL
+- Curso de Bases de Datos con MySQL y MariaDB
+- Curso de Bases de Datos en Azure
+- Curso de Big Data en AWS
+- Curso de Big Data y Machine Learning con Google Cloud Platform
+- Curso de Buenas Prácticas y Código Limpio en C#
+- Curso de Business Intelligence Utilidad y Áreas de Oportunidad
+- Curso de C++ Básico
+- Curso de COBOL desde Cero
+- Curso de CSS
+- Curso de CSS Grid Básico
+- Curso de Certificación ISO 27001 para Empresas
+- Curso de ChatBot con WhatsApp API
+- Curso de ChatGPT
+- Curso de ChatGPT con Google Sheets
+- Curso de ChatGPT para Product Designers Diseño asistido por AI
+- Curso de Ciberseguridad para Desarrollo Web
+- Curso de Ciencia de Datos para Análisis de Negocio
+- Curso de Claude AI
+- Curso de Claude Code
+- Curso de Clean Code y Buenas Prácticas con JavaScript
+- Curso de Closures y Scope en JavaScript
+- Curso de Clustering con Python y scikit-learn
+- Curso de Complejidad Algorítmica con Python
+- Curso de Conectores y Contracciones Informales en Inglés
+- Curso de Configuración Profesional de Entorno de Trabajo para Ciencia de Datos
+- Curso de Construcción de Oraciones en Inglés
+- Curso de Consumo de APIs REST con Angular
+- Curso de Contenedores y Aplicaciones en la Nube con Google Cloud Platform
+- Curso de Control de Flujo en C
+- Curso de Creación de APIs con Ruby on Rails
+- Curso de Creación de Páginas Web con Astro
+- Curso de Cypress Avanzado
+- Curso de DAX para Power BI
+- Curso de DLP Prevención de Pérdida de Datos
+- Curso de Databricks Arquitectura Delta Lake
+- Curso de Debugging con Chrome DevTools
+- Curso de Decision Trees y Random Forest con Python y scikit-learn
+- Curso de Deep Learning con TensorFlow y Keras
+- Curso de Desarrollo de Aplicaciones con SwiftUI
+- Curso de Desarrollo de Chatbots con OpenAI
+- Curso de Desarrollo en Laravel con Test Driven Development
+- Curso de Desarrollo y Despliegue en la Nube con Google Cloud Platform
+- Curso de Despliegue de Aplicaciones Python en la Nube
+- Curso de Diseño Mobile First Prototipos
+- Curso de Diseño Web con CSS Grid y Flexbox
+- Curso de Diseño de Interfaces de Voz
+- Curso de Diseño de Prototipos Móviles
+- Curso de Diseño para Developers
+- Curso de Diseño Ético para el Desarrollo de Productos Digitales con IA
+- Curso de Django
+- Curso de Django Rest Framework
+- Curso de Docker Avanzado
+- Curso de Docker Fundamentos
+- Curso de ECMAScript Historia y Versiones de JavaScript
+- Curso de Ecuaciones Diferenciales
+- Curso de End to End Testing para APIs REST con Node.js
+- Curso de Entornos Virtuales con Anaconda y Jupyter
+- Curso de Escaneo Activo y Análisis de Vulnerabilidades
+- Curso de Estadística Computacional con Python
+- Curso de Estadística Descriptiva
+- Curso de Estadística Inferencial para Data Science e Inteligencia Artificial
+- Curso de Estadística y Probabilidad
+- Curso de Estrategia de Seguridad Informática para Empresas
+- Curso de Estructuras de Datos
+- Curso de Estándares y  Buenas Prácticas para API REST con Laravel
+- Curso de Excel Analytics con AI y Python
+- Curso de Excel Avanzado con Macros
+- Curso de Excel Avanzado para Análisis de Datos
+- Curso de Excel Básico
+- Curso de Excel Básico Tablas y Fórmulas para la Gestión de Datos
+- Curso de Excel Intermedio
+- Curso de Experimentación en Machine Learning con Hugging Face
+- Curso de Expresiones Idiomáticas de Negocios en Inglés
+- Curso de FastAPI
+- Curso de Figma
+- Curso de Firebase 5 para Web
+- Curso de Firebase con Angular 20
+- Curso de Flask
+- Curso de Flujo de Desarrollo Moderno CodeStream
+- Curso de Flutter
+- Curso de Flutter con Firebase
+- Curso de Frontend Developer
+- Curso de Funciones Matemáticas para Data Science e Inteligencia Artificial
+- Curso de Funciones en C
+- Curso de Fundamentos de .NET
+- Curso de Fundamentos de Apache Airflow
+- Curso de Fundamentos de Arquitectura de Software
+- Curso de Fundamentos de Bases de Datos
+- Curso de Fundamentos de Criptografía
+- Curso de Fundamentos de Diseño Gráfico
+- Curso de Fundamentos de Ingeniería de Datos
+- Curso de Fundamentos de Ingeniería de Software
+- Curso de Fundamentos de JavaScript
+- Curso de Fundamentos de LLMs
+- Curso de Fundamentos de Machine Learning
+- Curso de Fundamentos de Matemáticas
+- Curso de Fundamentos de Microsoft Azure (AZ-900)
+- Curso de Fundamentos de Node.js
+- Curso de Fundamentos de Observabilidad con New Relic
+- Curso de Fundamentos de PHP
+- Curso de Fundamentos de Procesamiento de Lenguaje Natural con Python y NLTK
+- Curso de Fundamentos de Pruebas de Software
+- Curso de Fundamentos de Python
+- Curso de Fundamentos de React Native (nuevo sin descargar)
+- Curso de Fundamentos de Spark para Big Data
+- Curso de Fundamentos de Álgebra Lineal con Python
+- Curso de Git y GitHub
+- Curso de GitHub Actions
+- Curso de Glosario de términos
+- Curso de Glosario en Product Design
+- Curso de Go Avanzado Arquitectura de Eventos y CQRS
+- Curso de Go Avanzado Concurrencia y Patrones de Diseño
+- Curso de Go Avanzado Protobuffers y gRPC
+- Curso de Go Intermedio Programación Orientada a Objetos y Concurrencia
+- Curso de Google Associate Cloud Engineer Certification
+- Curso de Google Serverless
+- Curso de GraphQL con Node.js
+- Curso de Growth Marketing con Inteligencia Artificial
+- Curso de HTML
+- Curso de Hacking Aplicaciones Web Server Side
+- Curso de Hacking Escalada de Privilegios
+- Curso de Hacking Pentesting con Metasploit
+- Curso de Hacking Servicios de Red
+- Curso de Hacking Ético
+- Curso de Herramientas de AI para Developers
+- Curso de Herramientas de Inteligencia Artificial para Equipos de Datos
+- Curso de Illustrator para Diseño Gráfico
+- Curso de Informática Forense
+- Curso de Infraestructura Como Código en AWS
+- Curso de Ingeniería en Observabilidad con New Relic
+- Curso de Inglés Avanzado C1 Argumentos y Discusiones
+- Curso de Inglés Avanzado C1 Comunicación Persuasiva y Efectiva
+- Curso de Inglés Avanzado C1 Lenguaje Coloquial y Habitual
+- Curso de Inglés Avanzado C1 Presentaciones y Expresión Oral
+- Curso de Inglés Avanzado C1 Recursos Conversacionales y Lingüísticos
+- Curso de Inglés Básico A1 Fechas Horas y Expresiones Simples
+- Curso de Inglés Básico A1 Presente Simple
+- Curso de Inglés Básico A1 Verbo To Be
+- Curso de Inglés Básico A1 Verbos Comunes
+- Curso de Inglés Básico A1 para Principiantes
+- Curso de Inglés Básico A2 Conectores y Artículos
+- Curso de Inglés Básico A2 Conjunciones y Verbos
+- Curso de Inglés Básico A2 Cuantificadores y Superlativos
+- Curso de Inglés Básico A2 Descripciones y Comparaciones
+- Curso de Inglés Básico A2 Experiencias Pasadas y Planes
+- Curso de Inglés Básico A2 Infinitivos y Presente Continuo
+- Curso de Inglés Básico A2 Preguntas y Respuestas Comunes
+- Curso de Inglés Básico A2 Sustantivos e Intenciones Futuras
+- Curso de Inglés Intermedio Alto B2 Comentarios y Opiniones
+- Curso de Inglés Intermedio Alto B2 Discurso Indirecto y Condicionales
+- Curso de Inglés Intermedio Alto B2 Hábitos y Aproximaciones
+- Curso de Inglés Intermedio Alto B2 Pasado Perfecto y Frases Adverbiales
+- Curso de Inglés Intermedio Alto B2 Suposiciones e Instrucciones
+- Curso de Inglés Intermedio B1 Adjetivos y Preguntas Indirectas
+- Curso de Inglés Intermedio B1 Comparativos y Planes Futuros
+- Curso de Inglés Intermedio B1 Descripción de Eventos y Preferencias
+- Curso de Inglés Intermedio B1 Expresiones de Tiempo y Cantidad
+- Curso de Inglés Intermedio B1 Palabras Interrogativas y Propósitos
+- Curso de Inglés Intermedio B1 Preguntas Negativas y Recomendaciones
+- Curso de Inglés Intermedio B1 Preguntas de Confirmación y Posibilidades
+- Curso de Inglés Intermedio B1 Presente Perfecto y Preposiciones
+- Curso de Inglés Intermedio B1 Primer Condicional y Pasado Continuo
+- Curso de Inglés Intermedio B1 Pronombres y Cláusulas Relativas
+- Curso de Inglés Intermedio B1 Solicitudes y Pronombres Reflexivos
+- Curso de Inglés Intermedio B1 Voz Pasiva y Consejos
+- Curso de Inglés Práctico con ChatGPT
+- Curso de Inglés Práctico para Compras
+- Curso de Inglés Práctico para Consultas Médicas
+- Curso de Inglés Práctico para Conversaciones de Trabajo
+- Curso de Inglés Práctico para Viajes de Negocios
+- Curso de Inglés Práctico para Viajes de Turismo
+- Curso de Inglés Práctico sobre Elementos de Trabajo
+- Curso de Inglés Práctico sobre Nutrición y Fitness
+- Curso de Inglés Práctico sobre Vocabulario de Cocina
+- Curso de Inglés Práctico sobre Vocabulario de Música y Arte
+- Curso de Inglés Práctico sobre las Partes del Cuerpo
+- Curso de Inglés Práctico sobre los Miembros de la Familia
+- Curso de Inglés Práctico y Conversacional
+- Curso de Inglés de Negocios para Managers
+- Curso de Inglés para Ciberseguridad
+- Curso de Inglés para Entrevistas de Trabajo
+- Curso de Inglés para Marketing
+- Curso de Inglés para Programadores
+- Curso de Inglés para Servicio al Cliente
+- Curso de Inglés para Startups
+- Curso de Inglés para Ventas
+- Curso de Inglés para el Uso de Inteligencia Artificial
+- Curso de Integración Nativa iOS
+- Curso de Inteligencia Artificial para Content Marketing
+- Curso de Inteligencia Artificial para Finanzas
+- Curso de Inteligencia Artificial para Product Discovery y Product Design
+- Curso de Inteligencia Artificial para SEO
+- Curso de Inteligencia Artificial para Servicio al Cliente
+- Curso de Interfaces Dinámicas con Laravel Livewire
+- Curso de Introducción a AWS Cómputo, Almacenamiento y Bases de Datos
+- Curso de Introducción a AWS Fundamentos de Cloud Computing
+- Curso de Introducción a AWS Redes, Gobernanza y Machine Learning
+- Curso de Introducción a C
+- Curso de Introducción a Ciberseguridad Prevención de Ataques Informáticos
+- Curso de Introducción a DevOps
+- Curso de Introducción a Elasticsearch
+- Curso de Introducción a Excel para Principiantes Fundamentos
+- Curso de Introducción a Frameworks de PHP
+- Curso de Introducción a Google Cloud Platform
+- Curso de Introducción a Informática Forense
+- Curso de Introducción a Jamstack
+- Curso de Introducción a Laravel 8
+- Curso de Introducción a Laravel 9
+- Curso de Introducción a MongoDB
+- Curso de Introducción a Ruby on Rails
+- Curso de Introducción a la Administración de Servidores Linux
+- Curso de Introducción a la Automatización de Pruebas
+- Curso de Introducción a la Ingeniería Social Técnicas, Ataques y Pretexting
+- Curso de Introducción a la Terminal y Línea de Comandos
+- Curso de Introducción a la Web Historia y Funcionamiento de Internet
+- Curso de Introducción al Análisis de Malware
+- Curso de Introducción al Desarrollo Backend
+- Curso de Introducción al Despliegue de Aplicaciones
+- Curso de Introducción al Pentesting
+- Curso de Introducción al Testing con JavaScript
+- Curso de Java
+- Curso de Java SE SQL y Bases de Datos
+- Curso de Java Spring
+- Curso de Java Spring Boot
+- Curso de Java Spring Data JPA Bases de Datos
+- Curso de Java Spring Security Autenticación y Seguridad Web
+- Curso de JavaScript Engine V8
+- Curso de JavaScript Manipulación del DOM
+- Curso de JavaScript Web Components
+- Curso de Jetpack Compose en Android
+- Curso de Kotlin
+- Curso de Kubernetes
+- Curso de LangChain
+- Curso de LangChain para Manejo y Recuperación de Documentos
+- Curso de Laravel
+- Curso de Lenguaje y Notación Matemática
+- Curso de Looker Studio
+- Curso de MCP con Microsoft Azure
+- Curso de MLOPS Despliegue de Modelos de Machine Learning
+- Curso de Manejo de Datos Faltantes Detección y Exploración
+- Curso de Manejo de Datos Faltantes Imputación
+- Curso de Manejo de Datos en C# con LINQ
+- Curso de Manipulación de Arrays en JavaScript
+- Curso de Maquetación con Angular CDK y Tailwind CSS
+- Curso de Matemáticas Discretas
+- Curso de Matemáticas para Data Science Estadística Descriptiva
+- Curso de Matemáticas para Data Science Probabilidad
+- Curso de Materialize
+- Curso de Midjourney para Generación de Imágenes con AI
+- Curso de Modelado de Datos en MongoDB
+- Curso de MongoDB Aggregation Framework
+- Curso de Monorepositorios con NX
+- Curso de Máquinas Virtuales con Google Cloud Platform
+- Curso de NLP con Python
+- Curso de NPM Gestión de Paquetes y Dependencias en JavaScript
+- Curso de NestJS Autenticación con Passport y JWT
+- Curso de NestJS Persistencia de Datos con MongoDB
+- Curso de NestJS Persistencia de Datos con TypeORM
+- Curso de NestJS Programación Modular, Documentación con Swagger y Deploy
+- Curso de Next.js Autenticación
+- Curso de Next.js Avanzado
+- Curso de Next.js Seguridad Web con OWASP
+- Curso de Next.js Sitios Estáticos y Jamstack
+- Curso de Node.js Autenticación, Microservicios y Redis
+- Curso de Node.js Avanzado
+- Curso de OAuth 2.0 y OpenID Connect Flujos de Autenticación y Casos de Estudio
+- Curso de OWASP Top 10 Riesgos en Aplicaciones
+- Curso de Observabilidad de Agentes AI con LangSmith
+- Curso de OpenAI API
+- Curso de Optimización Web
+- Curso de Optimización de Bases de Datos en SQL Server
+- Curso de Ortografía y Puntuación en Inglés
+- Curso de PHP Avanzado
+- Curso de PHP Bases de Datos
+- Curso de PHP Cookies, Sesiones y Modularización
+- Curso de PHP Integración con HTML
+- Curso de Patrones MVVM en Android
+- Curso de Patrones MVVM en iOS
+- Curso de Patrones de Diseño en Android
+- Curso de Patrones de Diseño y SOLID en Python
+- Curso de Pentesting a Redes
+- Curso de Performance Testing en Node.js con K6
+- Curso de Photoshop
+- Curso de Phrasal Verbs Comunes en Inglés
+- Curso de PostgreSQL
+- Curso de PostgreSQL Aplicado a Ciencia de Datos
+- Curso de Power BI
+- Curso de Preparación para IELTS
+- Curso de Preparación para TOEFL
+- Curso de Preparación para el Examen TOEFL
+- Curso de Preparación para la Certificación CompTIA Security+
+- Curso de Principios SOLID en C# y .NET
+- Curso de Product Management para Mobile
+- Curso de Programación Funcional con Java SE
+- Curso de Programación Orientada a Objetos con C#
+- Curso de Programación Orientada a Objetos con C++
+- Curso de Programación Orientada a Objetos en Swift
+- Curso de Prompt Engineering
+- Curso de Pruebas Unitarias en Angular
+- Curso de Python Comprehensions, Funciones y Manejo de Errores
+- Curso de Python Orientado a Objetos
+- Curso de Python PIP y Entornos Virtuales
+- Curso de Python Profesional Arquitectura de Proyectos, Entornos y PyPI
+- Curso de Python para Ciencia de Datos
+- Curso de RAG con Microsoft Azure
+- Curso de RPA e Hiperautomatización con AI
+- Curso de React Avanzado
+- Curso de React Testing Library
+- Curso de React.js
+- Curso de React.js Manejo Profesional del Estado
+- Curso de React.js Navegación con React Router
+- Curso de React.js Patrones de Render y Composición
+- Curso de React.js con TypeScript
+- Curso de Reactividad con Vue.js 3
+- Curso de Redes Informáticas de Internet
+- Curso de Redes Neuronales con PyTorch
+- Curso de Redes de Internet - Profesional
+- Curso de Regresión Lineal con Python y scikit-learn
+- Curso de Regresión Logística con Python y scikit-learn
+- Curso de Responsive Design Maquetación Mobile First
+- Curso de Rust básico
+- Curso de SQL en Azure
+- Curso de SQL y MySQL
+- Curso de Seguridad Informática para Equipos Técnicos
+- Curso de Seguridad de Redes On-Premise
+- Curso de Server Side Render o SSR con React.js
+- Curso de Server Side Rendering con Nuxt 2
+- Curso de Single Page Application con JavaScript Vanilla
+- Curso de Single Page Applications en Laravel con Inertia y Vue
+- Curso de Sketch
+- Curso de SolidJS
+- Curso de Stable Diffusion para Generación de Imágenes con AI
+- Curso de Svelte
+- Curso de Swarm
+- Curso de Swift Unit Testing
+- Curso de Swift con Storyboards
+- Curso de Swift para Apps iOS
+- Curso de SwiftUI Porteo y Ciclo de Vida de Aplicaciones
+- Curso de Symfony
+- Curso de Tableau Visualización de Datos y Storytelling para Negocios
+- Curso de TailwindCSS
+- Curso de Terraform
+- Curso de Testing con Vue.js 2
+- Curso de Toma de Decisiones Basadas en Datos
+- Curso de Transformaciones y Transiciones en CSS
+- Curso de TypeScript
+- Curso de TypeScript Programación Orientada a Objetos y Asincronismo
+- Curso de TypeScript Tipos Avanzados y Funciones
+- Curso de Unit Testing con C# y .NET
+- Curso de Unit Testing en Go
+- Curso de Unit Testing en Python
+- Curso de Unit Testing en Vue.js 3
+- Curso de Visión Artificial con Python
+- Curso de Visualización de Datos para BI
+- Curso de Visualización de Datos y Storytelling con Latinometrics
+- Curso de Vite.js
+- Curso de Vocabulario en Inglés para el Trabajo
+- Curso de Vue.js Componentes y Composition API
+- Curso de Vue.js Manejo del Estado con  Vuex
+- Curso de Vue.js Manejo del Estado con Pinia
+- Curso de Vue.js Navegación con Vue Router
+- Curso de Web Apps y Logic Apps en Azure
+- Curso de Webpack
+- Curso de Webpack con Express.js, React.js y TypeScript
+- Curso de Windsurf AI
+- Curso de fundamentos de Material Design (Android) y Human Interface Guidelines (iOS)
+- Curso de iOS Modo Offline con Swift Data y Realm
+- Curso de tips y trucos de IA
+- Curso de Álgebra Lineal para Machine Learning
+- Curso de Álgebra y Funciones
+- Curso de Ética y Manejo de Datos para Data Science e Inteligencia Artificial
+- Curso del Ciclo de Vida de Apps Mobile
+- Curso de Vue.js Introducción y Fundamentos
+- Curso en Inglés para el Desarrollo Profesional
+- Curso para Certificacion de Node.js con OpenJS Foundation 2023
+- Curso para Crear Agentes de AI con MongoDB
+- Curso para Desarrollar tu Creatividad
+- Curso para despertar tu Creatividad
+- Guía para Aprender Seguridad Informática
+- Taller de Secretos Ocultos de JavaScript Protección de Clases y Objetos

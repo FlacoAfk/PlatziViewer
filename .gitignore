@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+*.log
+server_log_full.txt
+
+# Cache (regenerable)
+courses_cache.json
+
+# Windows
+desktop.ini
+Thumbs.db
+
+# Credentials (keep local only)
+service_account.json
