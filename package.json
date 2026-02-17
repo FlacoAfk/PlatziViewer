@@ -1,0 +1,77 @@
+{
+  "name": "platzi-viewer",
+  "version": "1.0.0",
+  "description": "Plataforma web para visualizar y organizar cursos de Platzi de manera local",
+  "main": "index.html",
+  "scripts": {
+    "dev": "python server.py",
+    "build": "echo 'No build process needed for static files'",
+    "lint": "eslint js/ --ext .js",
+    "lint:fix": "eslint js/ --ext .js --fix",
+    "format": "prettier --write js/**/*.js",
+    "test": "echo 'Tests not implemented yet'",
+    "serve": "python -m http.server 8080 --directory .",
+    "start": "python server.py"
+  },
+  "keywords": [
+    "platzi",
+    "education",
+    "learning",
+    "video-streaming",
+    "progress-tracking",
+    "courses",
+    "javascript",
+    "python"
+  ],
+  "author": {
+    "name": "Platzi Viewer Contributors",
+    "email": "dev@platzi-viewer.com",
+    "url": "https://github.com/tu-usuario/platzi-viewer"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tu-usuario/platzi-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tu-usuario/platzi-viewer/issues"
+  },
+  "homepage": "https://github.com/tu-usuario/platzi-viewer#readme",
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^2.8.0",
+    "@babel/core": "^7.20.0",
+    "@babel/preset-env": "^7.20.0"
+  },
+  "eslintConfig": {
+    "env": {
+      "browser": true,
+      "es2021": true,
+      "node": true
+    },
+    "extends": "eslint:recommended",
+    "parserOptions": {
+      "ecmaVersion": 2021,
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-console": "warn",
+      "no-unused-vars": "error",
+      "prefer-const": "error",
+      "no-var": "error"
+    }
+  },
+  "prettier": {
+    "semi": true,
+    "trailingComma": "es5",
+    "singleQuote": true,
+    "printWidth": 100,
+    "tabWidth": 2
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie <= 11"
+  ]
+}
