@@ -58,4 +58,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Set initial active nav link
     Navbar.updateActive();
+    Navbar.init();
 });

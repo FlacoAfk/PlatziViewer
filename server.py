@@ -16,11 +16,21 @@ import subprocess
 
 
 # Configuración
-COURSES_PATH = r"H:\Mi unidad\PlatziCoursesFlat"
-VIEWER_PATH = r"H:\Mi unidad\platzi-viewer"
+COURSES_PATH = r"C:\Users\elkaw\Desktop\platzi-downloader"
+VIEWER_PATH = r"C:\Users\elkaw\Desktop\platzi-viewer"
 PORT = 8080
 PROGRESS_FILE = os.path.join(VIEWER_PATH, "progress.json")
 CACHE_FILE = os.path.join(VIEWER_PATH, "courses_cache.json")
+
+# Categorías para estructura plana
+CATEGORIES = {
+    'Courses': {
+        'id': 'downloads',
+        'name': 'Descargas',
+        'icon': '📂',
+        'description': 'Cursos descargados localmente'
+    }
+}
 
 # Caché global
 courses_cache = None
@@ -103,7 +113,18 @@ def scan_classes(module_path):
             name = name.split('. ', 1)[-1] if '. ' in name else name
         else:
             continue
-        
+            
+        # Generar paths relativos con prefijo local:
+        def get_local_path(filename):
+            if not filename: return None
+            # Ruta absoluta del archivo
+            abs_path = os.path.join(module_path, filename)
+            # Ruta relativa desde COURSES_PATH
+            rel_path = os.path.relpath(abs_path, start=COURSES_PATH)
+            # Normalizar separadores a /
+            rel_path = rel_path.replace(os.sep, '/')
+            return f"local:{rel_path}"
+
         classes.append({
             'num': class_num,
             'name': name[:60],
@@ -113,11 +134,11 @@ def scan_classes(module_path):
             'hasReading': reading_file is not None,
             'hasHtml': html_file is not None and video_file is None,
             'files': {
-                'video': video_file,
-                'summary': summary_file,
-                'subtitles': vtt_file,
-                'reading': reading_file,
-                'html': html_file
+                'video': get_local_path(video_file),
+                'summary': get_local_path(summary_file),
+                'subtitles': get_local_path(vtt_file),
+                'reading': get_local_path(reading_file),
+                'html': get_local_path(html_file)
             }
         })
     

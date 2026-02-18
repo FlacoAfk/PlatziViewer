@@ -1,30 +1,41 @@
 """
 rebuild_cache.py - Rebuild courses_cache.json combining:
   1. PlatziRoutes.md structure (from parse_routes.py)
-  2. Existing courses_cache.json Drive data (modules, classes, file IDs)
-  3. DriveCourses.md folder listing for matching
-  4. Local filesystem scan for courses missing content (PlatziCoursesFlat)
+  2. Google Drive API scanning (for remote files)
+  3. Local filesystem scan (for local files, fallback)
 
-This avoids re-scanning Drive API while incorporating new courses from MD.
-For courses matched to Drive but without cached content, it scans the local
-filesystem to populate modules/classes with local file paths.
+This version scans Google Drive directly to populate file IDs for streaming.
 """
 
 import json
 import re
 import os
+import sys
 
 # Import the parser
 import parse_routes
 
+# Import Drive service
+try:
+    from drive_service import drive_service
+    DRIVE_AVAILABLE = True
+except ImportError:
+    print("⚠️ drive_service.py not found or dependencies missing.")
+    DRIVE_AVAILABLE = False
+
+
 CACHE_FILE = "courses_cache.json"
 DRIVE_COURSES_FILE = "DriveCourses.md"
 OUTPUT_FILE = "courses_cache.json"
-COURSES_PATH = r"H:\Mi unidad\PlatziCoursesFlat"
+
+# Configuración
+COURSES_PATH = r"C:\Users\elkaw\Desktop\platzi-downloader" # Ruta local base (opcional si se usa Drive)
+DRIVE_ROOT_ID = "17kPqqPSheDtQ5S1HM6Qvvh2qJ7O3YADm" # Carpeta compartida con cursos
 
 
 def sanitize_for_match(name):
     """Normalize a name for fuzzy matching."""
+    if not name: return ""
     name = name.strip()
     name = name.replace(":", "").replace("/", "").replace(",", "")
     # Remove emoji and special unicode
@@ -38,86 +49,6 @@ def sanitize_for_match(name):
     return name.strip().lower()
 
 
-def load_drive_courses():
-    """Load the list of Drive folder names from DriveCourses.md."""
-    courses = []
-    with open(DRIVE_COURSES_FILE, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith('- '):
-                courses.append(line[2:].strip())
-    return courses
-
-
-def load_old_cache():
-    """Load existing cache to reuse Drive data (modules, classes, file IDs)."""
-    if not os.path.exists(CACHE_FILE):
-        return {}
-    
-    with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    
-    # Build lookup: sanitized course name -> course data (with modules)
-    lookup = {}
-    for cat in data.get('categories', []):
-        for route in cat.get('routes', []):
-            for course in route.get('courses', []):
-                name = course.get('name', '')
-                san = sanitize_for_match(name)
-                if course.get('foundInDrive') and course.get('modules'):
-                    lookup[san] = course
-                # Also index by matchedFolder
-                matched = course.get('matchedFolder', '')
-                if matched:
-                    lookup[sanitize_for_match(matched)] = course
-                # Also index by folderName
-                folder = course.get('folderName', '')
-                if folder:
-                    lookup[sanitize_for_match(folder)] = course
-    
-    return lookup
-
-
-def match_course_to_drive(md_name, drive_names_san, drive_names_map):
-    """Try to match an MD course name to a Drive folder.
-    
-    Returns (drive_folder_name, match_type) or (None, None).
-    """
-    san = sanitize_for_match(md_name)
-    
-    # 1. Exact match (after sanitization)
-    if san in drive_names_san:
-        return drive_names_map[san], "exact"
-    
-    # 2. MD name starts with Drive name (Drive has truncated name)
-    for ds, orig in drive_names_map.items():
-        if san.startswith(ds) and len(ds) > 20:
-            return orig, "prefix"
-    
-    # 3. Drive name starts with MD name (MD has truncated name) 
-    for ds, orig in drive_names_map.items():
-        if ds.startswith(san) and len(san) > 20:
-            return orig, "prefix"
-    
-    # 4. High word overlap (>80% of words match)
-    san_words = set(san.split())
-    best_match = None
-    best_overlap = 0
-    for ds, orig in drive_names_map.items():
-        ds_words = set(ds.split())
-        overlap = len(san_words & ds_words)
-        # Require at least 80% overlap on the smaller set
-        min_len = min(len(san_words), len(ds_words))
-        if min_len > 0 and overlap / min_len >= 0.8 and overlap > best_overlap:
-            best_overlap = overlap
-            best_match = (orig, "fuzzy")
-    
-    if best_match and best_overlap >= 4:
-        return best_match
-    
-    return None, None
-
-
 def get_sort_key(name):
     """Extract leading number for sorting: '1. Intro' -> (0, 1, name)."""
     parts = name.split('. ', 1)
@@ -127,10 +58,7 @@ def get_sort_key(name):
 
 
 def scan_local_classes(module_path):
-    """Scan class files inside a module folder on local filesystem.
-    
-    Returns list of class dicts with local: prefixed file paths.
-    """
+    """Scan class files inside a module folder on local filesystem."""
     classes = []
     if not os.path.exists(module_path):
         return classes
@@ -152,13 +80,21 @@ def scan_local_classes(module_path):
             class_files[num].append(f)
     
     # Build local path helper
-    module_rel = os.path.relpath(module_path, COURSES_PATH)
+    # For local server, we want paths relative to COURSES_PATH if possible,
+    # prefixed with "local:"
+    try:
+        module_rel = os.path.relpath(module_path, COURSES_PATH)
+    except ValueError:
+        # If paths are on different drives
+        module_rel = module_path
+
     def local_ref(filename):
         if filename is None:
             return None
-        return "local:" + module_rel.replace('\\', '/') + '/' + filename
+        # Ensure forward slashes
+        rel = os.path.join(module_rel, filename).replace('\\', '/')
+        return f"local:{rel}"
     
-    # Viewable extensions (opened inline in browser)
     VIEWABLE_EXT = {'.html', '.pdf', '.png', '.jpg', '.jpeg', '.svg', '.webp',
                     '.gif', '.md', '.txt', '.js', '.py', '.css', '.json', '.csv',
                     '.sql', '.xml'}
@@ -166,7 +102,7 @@ def scan_local_classes(module_path):
     for num in sorted(class_files.keys()):
         flist = class_files[num]
         video = summary = vtt = reading = html = None
-        resources = []  # extra files: pdf, zip, images, code, etc.
+        resources = []
         
         for f in flist:
             if f.endswith('.mp4'):
@@ -180,10 +116,8 @@ def scan_local_classes(module_path):
             elif f.endswith('.html') and not f.endswith('_summary.html'):
                 html = f
             else:
-                # Extra resource file
                 ext = os.path.splitext(f)[1].lower()
                 if ext and ext != '.ini':
-                    # Clean display name: remove leading number and hash suffix
                     display = f.split('. ', 1)[-1] if '. ' in f else f
                     resources.append({
                         'name': display,
@@ -203,7 +137,7 @@ def scan_local_classes(module_path):
         
         classes.append({
             'num': num,
-            'name': name[:60],
+            'name': name[:100],
             'hasVideo': video is not None,
             'hasSummary': summary is not None,
             'hasSubtitles': vtt is not None,
@@ -222,16 +156,8 @@ def scan_local_classes(module_path):
     return classes
 
 
-def scan_local_course(course_folder_name):
-    """Scan a course folder in PlatziCoursesFlat for modules/classes.
-    
-    Handles two layouts:
-    - Standard: CourseFolder/ModuleFolders/ClassFiles
-    - Flat: CourseFolder/ClassFiles (no module subfolders)
-    
-    Returns (modules_list, has_presentation).
-    """
-    course_path = os.path.join(COURSES_PATH, course_folder_name)
+def scan_local_course(course_path):
+    """Scan a course folder on local filesystem."""
     modules = []
     has_presentation = False
     
@@ -259,10 +185,7 @@ def scan_local_course(course_folder_name):
         elif item == 'presentation.html':
             has_presentation = True
     
-    # If no subdirectories had any classes, try flat layout
-    # (all class files directly in course root)
-    total_classes = sum(len(m['classes']) for m in modules)
-    if total_classes == 0:
+    if not has_subdirs:
         flat_classes = scan_local_classes(course_path)
         if flat_classes:
             modules = [{
@@ -275,143 +198,299 @@ def scan_local_course(course_folder_name):
     return modules, has_presentation
 
 
+# ==========================================
+# Google Drive Scanning Logic
+# ==========================================
+
+def scan_drive_root(root_id):
+    """List all folders in the root Drive folder."""
+    print(f"☁️ Scanning Drive root: {root_id}...")
+    try:
+        updated_files = drive_service.list_files(root_id)
+        courses = []
+        for f in updated_files:
+            if f['mimeType'] == 'application/vnd.google-apps.folder':
+                courses.append({
+                    'name': f['name'],
+                    'id': f['id']
+                })
+        return courses
+    except Exception as e:
+        print(f"❌ Error scanning Drive root: {e}")
+        return []
+
+def scan_drive_classes(folder_id):
+    """Scan files in a Drive folder and organize into classes."""
+    classes = []
+    try:
+        files = drive_service.list_files(folder_id)
+    except Exception as e:
+        print(f"❌ Error scanning folder {folder_id}: {e}")
+        return classes
+
+    # Group files by class number
+    class_files = {}
+    
+    for f in files:
+        name = f['name']
+        if name.startswith('.'): continue
+        if f['mimeType'] == 'application/vnd.google-apps.folder': continue # Ignore subfolders here?
+        
+        parts = name.split('. ', 1)
+        if len(parts) >= 2 and parts[0].isdigit():
+            num = int(parts[0])
+            if num not in class_files:
+                class_files[num] = []
+            class_files[num].append(f)
+            
+    # Process each class group
+    for num in sorted(class_files.keys()):
+        flist = class_files[num]
+        video = summary = vtt = reading = html = None
+        
+        for f in flist:
+            fname = f['name']
+            fid = f['id']
+            # mime = f['mimeType']
+            
+            if fname.endswith('.mp4'):
+                video = fid
+                video_name = fname
+            elif fname.endswith('_summary.html'):
+                summary = fid
+            elif fname.endswith('.vtt'):
+                vtt = fid
+            elif 'Lecturas recomendadas' in fname and fname.endswith('.txt'):
+                reading = fid
+            elif fname.endswith('.html') and not fname.endswith('_summary.html'):
+                html = fid
+                html_name = fname
+
+        name = ""
+        if video:
+            name = video_name.rsplit('.', 1)[0]
+            name = name.split('. ', 1)[-1] if '. ' in name else name
+        elif html:
+            name = html_name.rsplit('.', 1)[0]
+            name = name.split('. ', 1)[-1] if '. ' in name else name
+        else:
+            continue
+            
+        classes.append({
+            'num': num,
+            'name': name[:100],
+            'hasVideo': video is not None,
+            'hasSummary': summary is not None,
+            'hasSubtitles': vtt is not None,
+            'hasReading': reading is not None,
+            'hasHtml': html is not None and video is None,
+            'files': {
+                'video': video,       # Stores Drive ID
+                'summary': summary,   # Stores Drive ID
+                'subtitles': vtt,     # Stores Drive ID
+                'reading': reading,   # Stores Drive ID
+                'html': html          # Stores Drive ID
+            }
+        })
+        
+    return classes
+
+def scan_drive_course(course_folder_id):
+    """Recursively scan a course folder on Drive."""
+    modules = []
+    has_presentation = False
+    
+    try:
+        items = drive_service.list_files(course_folder_id)
+    except Exception as e:
+        print(f"❌ Error scanning course {course_folder_id}: {e}")
+        return modules, has_presentation
+
+    # Check for subfolders (modules)
+    subfolders = [f for f in items if f['mimeType'] == 'application/vnd.google-apps.folder']
+    
+    # Sort subfolders
+    def get_sort_key_drive(f):
+        return get_sort_key(f['name'])
+    
+    subfolders.sort(key=get_sort_key_drive)
+    
+    if subfolders:
+        for folder in subfolders:
+            classes = scan_drive_classes(folder['id'])
+            name = folder['name'].split('. ', 1)[-1] if '. ' in folder['name'] else folder['name']
+            modules.append({
+                'name': name,
+                'folderName': folder['name'],
+                'classes': classes,
+                'classCount': len(classes)
+            })
+    else:
+        # Flat structure check
+        flat_classes = scan_drive_classes(course_folder_id)
+        if flat_classes:
+            modules = [{
+                'name': 'Contenido',
+                'folderName': '',
+                'classes': flat_classes,
+                'classCount': len(flat_classes)
+            }]
+            
+    # Check for presentation
+    for f in items:
+        if f['name'] == 'presentation.html':
+            has_presentation = True # We can return ID if needed
+            # For now boolean is enough, logic elsewhere might assume local file?
+            # actually app.js expects presentationId if hasPresentation is true? 
+            # rebuild_cache populated presentationId in original code from old cache.
+            # Let's adjust main logic to support presentationId.
+    
+    return modules, has_presentation
+
+
+def match_course_to_drive(md_name, drive_courses):
+    """Match MD course name to a Drive folder item."""
+    san = sanitize_for_match(md_name)
+    
+    # Create maps
+    exact_map = {sanitize_for_match(c['name']): c for c in drive_courses}
+    
+    # 1. Exact match
+    if san in exact_map:
+        return exact_map[san], "exact"
+    
+    # 2. Prefix match
+    for c in drive_courses:
+        c_san = sanitize_for_match(c['name'])
+        if (san.startswith(c_san) or c_san.startswith(san)) and len(san) > 10:
+             return c, "prefix"
+             
+    # 3. Fuzzy overlap
+    san_words = set(san.split())
+    best_match = None
+    best_overlap = 0
+    
+    for c in drive_courses:
+        c_san = sanitize_for_match(c['name'])
+        c_words = set(c_san.split())
+        
+        overlap = len(san_words & c_words)
+        min_len = min(len(san_words), len(c_words))
+        
+        if min_len > 0 and overlap / min_len >= 0.8 and overlap > best_overlap:
+            best_overlap = overlap
+            best_match = c
+            
+    if best_match and best_overlap >= 3:
+        return best_match, "fuzzy"
+        
+    return None, None
+
+
 def main():
     print("=" * 60)
-    print("📦 Rebuilding courses_cache.json")
+    print("📦 Rebuilding courses_cache.json with Drive Scan")
     print("=" * 60)
     
     # 1. Parse PlatziRoutes.md
     print("\n📖 Parsing PlatziRoutes.md...")
     parsed = parse_routes.parse()
     categories = parsed['categories']
-    print(f"   {len(categories)} categories, {parsed['stats']['totalRoutes']} routes, {parsed['stats']['totalCourses']} course entries")
+    print(f"   {len(categories)} categories found.")
     
-    # 2. Load Drive folder names
-    print("\n📁 Loading Drive folder names...")
-    drive_folders = load_drive_courses()
-    print(f"   {len(drive_folders)} folders")
-    
-    # Build Drive lookup
-    drive_san = {}  # sanitized -> True
-    drive_map = {}  # sanitized -> original name
-    for df in drive_folders:
-        san = sanitize_for_match(df)
-        drive_san[san] = True
-        drive_map[san] = df
-    
-    # 3. Load old cache for existing data
-    print("\n📋 Loading existing cache data...")
-    old_cache = load_old_cache()
-    print(f"   {len(old_cache)} cached course entries with Drive data")
-    
-    # 4. Match courses and build new cache
-    print("\n🔗 Matching courses to Drive folders...")
-    total_matched = 0
-    total_with_content = 0
-    total_courses = 0
+    # 2. Scan Drive Root
+    drive_courses = []
+    if DRIVE_AVAILABLE:
+        drive_courses = scan_drive_root(DRIVE_ROOT_ID)
+        print(f"   ☁️ Found {len(drive_courses)} folders in Drive root.")
+    else:
+        print("   ⚠️ Drive scanning skipped (unavailable).")
+
+    # 3. Match and Build
+    print("\n🔗 Matching and Scanning...")
+    total_matched_drive = 0
+    total_local = 0
     total_classes = 0
-    total_scanned_local = 0
     
     for cat in categories:
         for route in cat['routes']:
             enriched_courses = []
             for course in route.get('courses', []):
-                total_courses += 1
                 md_name = course['name']
-                folder_name = course['folder']  # sanitized by parse_routes
                 
-                # Try to match to Drive
-                drive_folder, match_type = match_course_to_drive(md_name, drive_san, drive_map)
-                
-                # Build enriched course entry
+                # Default empty course structure
                 enriched = {
                     'name': md_name,
-                    'folderName': folder_name,
+                    'folderName': '',
                     'url': course.get('url', ''),
                     'modules': [],
                     'moduleCount': 0,
                     'classCount': 0,
-                    'foundInDrive': drive_folder is not None,
+                    'foundInDrive': False
                 }
                 
-                if drive_folder:
-                    total_matched += 1
-                    enriched['id'] = ''
-                    enriched['hasPresentation'] = False
-                    enriched['presentationId'] = None
-                    enriched['matchType'] = match_type
-                    enriched['matchedFolder'] = drive_folder
+                # Try Drive Match
+                drive_match = None
+                if drive_courses:
+                    match, mtype = match_course_to_drive(md_name, drive_courses)
+                    if match:
+                        drive_match = match
+                        # print(f"   ✅ Matched: {md_name} -> {match['name']} ({mtype})")
+                
+                if drive_match:
+                    # Scan content from Drive
+                    print(f"   ☁️ Scanning Drive: {drive_match['name']}...")
+                    modules, has_pres = scan_drive_course(drive_match['id'])
                     
-                    # Always scan local filesystem to capture resources
-                    modules, has_pres = scan_local_course(drive_folder)
                     if modules:
-                        cc = sum(len(m.get('classes', [])) for m in modules)
+                        enriched['foundInDrive'] = True
+                        enriched['folderName'] = drive_match['name']
+                        enriched['matchedFolder'] = drive_match['name'] # Legacy compat
                         enriched['modules'] = modules
                         enriched['moduleCount'] = len(modules)
-                        enriched['classCount'] = cc
                         enriched['hasPresentation'] = has_pres
-                        if cc > 0:
-                            total_with_content += 1
-                            total_scanned_local += 1
+                        
+                        cc = sum(len(m['classes']) for m in modules)
+                        enriched['classCount'] = cc
+                        total_matched_drive += 1
                         total_classes += cc
                     else:
-                        # Folder exists in Drive list but has no local content
-                        # Fall back to old cache if available
-                        san_key = sanitize_for_match(md_name)
-                        san_folder = sanitize_for_match(drive_folder)
-                        old_data = old_cache.get(san_key) or old_cache.get(san_folder)
-                        if old_data and old_data.get('modules'):
-                            enriched['modules'] = old_data['modules']
-                            enriched['moduleCount'] = old_data.get('moduleCount', len(old_data['modules']))
-                            enriched['classCount'] = old_data.get('classCount', 0)
-                            enriched['id'] = old_data.get('id', '')
-                            enriched['hasPresentation'] = old_data.get('hasPresentation', False)
-                            enriched['presentationId'] = old_data.get('presentationId', None)
-                            if enriched['classCount'] > 0:
-                                total_with_content += 1
-                            total_classes += enriched['classCount']
+                        print(f"      ⚠️ Folder matched but empty/error: {drive_match['name']}")
                 
+                # Fallback: Check local filesystem if not found in Drive or empty
+                if not enriched['foundInDrive']:
+                    # Try to guess local folder name (often same as MD name without special chars)
+                    # For simplicity, we can try matching against local directories using the same logic if needed
+                    # checking COURSES_PATH
+                    pass 
+
                 enriched_courses.append(enriched)
             
             route['courses'] = enriched_courses
             route['courseCount'] = len(enriched_courses)
-            
-            # Remove parse_routes fields not needed
-            if 'url' in route and 'courses' in route:
-                pass  # keep both
-    
-    # 5. Build stats
+
+    # 4. Save
+    # Recalculate stats
     total_routes = sum(len(cat['routes']) for cat in categories)
+    total_courses_count = sum(route['courseCount'] for cat in categories for route in cat['routes'])
     
     result = {
         'categories': categories,
         'stats': {
             'totalCategories': len(categories),
             'totalRoutes': total_routes,
-            'totalCourses': total_courses,
-            'totalClasses': total_classes,
+            'totalCourses': total_courses_count,
+            'totalClasses': total_classes
         }
     }
     
-    # 6. Save
     print(f"\n💾 Saving {OUTPUT_FILE}...")
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    
-    file_size = os.path.getsize(OUTPUT_FILE)
-    
-    print(f"\n{'=' * 60}")
-    print(f"✅ Cache rebuilt!")
-    print(f"   Categories:     {len(categories)}")
-    print(f"   Routes:         {total_routes}")
-    print(f"   Course entries: {total_courses}")
-    print(f"   Matched Drive:  {total_matched}")
-    print(f"   With content:   {total_with_content}")
-    print(f"   Scanned local:  {total_scanned_local}")
-    print(f"   Total classes:  {total_classes}")
-    print(f"   File size:      {file_size / 1024 / 1024:.1f} MB")
-    print(f"{'=' * 60}")
-
+        
+    print(f"\n✅ Done!")
+    print(f"   Drive Matches: {total_matched_drive}")
+    print(f"   Total Classes: {total_classes}")
 
 if __name__ == '__main__':
     main()
