@@ -1,6 +1,13 @@
 export const API_URL = 'http://localhost:8080';
 
 export class ApiService {
+    static _normalizeDriveRef(fileRef) {
+        if (!fileRef) return '';
+        const value = String(fileRef).trim();
+        if (!value || value.startsWith('local:')) return '';
+        return encodeURIComponent(value);
+    }
+
     static async getCourses(retries = 30) {
         for (let i = 0; i < retries; i++) {
             try {
@@ -26,12 +33,14 @@ export class ApiService {
     }
 
     static getVideoUrl(fileId) {
-        if (!fileId) return '';
-        return `${API_URL}/drive/files/${fileId}`;
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return '';
+        return `${API_URL}/drive/files/${safeRef}`;
     }
 
     static getFileUrl(fileId) {
-        if (!fileId) return '';
-        return `${API_URL}/drive/files/${fileId}`;
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return '';
+        return `${API_URL}/drive/files/${safeRef}`;
     }
 }

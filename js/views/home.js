@@ -35,7 +35,7 @@ export default class HomeView {
 
     renderCategories() {
         return this.data.categories.map((cat, catIdx) => `
-            <a href="#" class="category-pill" onclick="event.preventDefault(); document.getElementById('cat-section-${catIdx}').scrollIntoView({behavior:'smooth'})">
+            <a href="#" class="category-pill" data-cat-section="cat-section-${catIdx}">
                 ${cat.icon} ${cat.name}
             </a>
         `).join('');
@@ -64,11 +64,13 @@ export default class HomeView {
             ).join('');
 
             return `
-                <section class="routes-section" id="cat-section-${catIdx}">
+                <section class="routes-section category-routes-section" id="cat-section-${catIdx}">
                     <div class="section-header">
                         <h2>${cat.icon} ${cat.name}</h2>
                         <p class="section-subtitle">${cat.description} • ${realRoutes.length} rutas • ${standaloneCourses.length > 0 ? standaloneCourses.length + ' cursos independientes' : (cat.courseCount || 0) + ' cursos'}</p>
                     </div>
+
+                    <div class="category-routes-body">
 
                     ${realRoutes.length > 0 ? `
                         <div class="subsection-header">
@@ -93,8 +95,44 @@ export default class HomeView {
                     ` : ''}
 
                     ${allItems.length === 0 ? '<p style="color: var(--text-muted)">No hay contenido disponible</p>' : ''}
+                    </div>
                 </section>
             `;
         }).join('');
+    }
+
+    mounted() {
+        const view = document.querySelector('.view-home');
+        const categoryPills = document.querySelectorAll('.category-pill[data-cat-section]');
+        const sections = document.querySelectorAll('.category-routes-section');
+        if (!view || categoryPills.length === 0 || sections.length === 0) return;
+
+        const isTouch = window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+
+        if (isTouch) {
+            view.classList.add('touch-categories');
+            sections.forEach((section) => section.classList.remove('is-open'));
+        } else {
+            view.classList.remove('touch-categories');
+            sections.forEach((section) => section.classList.remove('is-open'));
+        }
+
+        categoryPills.forEach((pill) => {
+            pill.addEventListener('click', (event) => {
+                event.preventDefault();
+
+                const sectionId = pill.dataset.catSection;
+                const target = document.getElementById(sectionId);
+                if (!target) return;
+
+                if (isTouch) {
+                    const willOpen = !target.classList.contains('is-open');
+                    sections.forEach((section) => section.classList.remove('is-open'));
+                    if (willOpen) target.classList.add('is-open');
+                }
+
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
     }
 }

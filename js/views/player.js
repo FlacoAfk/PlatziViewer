@@ -14,7 +14,114 @@ export default class PlayerView {
         this.classData = state.getClass(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
         this.classKey = state.getClassKey(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
 
+        this._isTouchMode = false;
+        this._recommendedQualityLabel = null;
+
         window.__playerView = this;
+    }
+
+    _isTouchDevice() {
+        return (
+            window.matchMedia('(hover: none), (pointer: coarse)').matches
+            || 'ontouchstart' in window
+            || navigator.maxTouchPoints > 0
+        );
+    }
+
+    _getRecommendedQualityLabel(qualities) {
+        if (!qualities?.length) return 'Original';
+
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        const saveData = !!connection?.saveData;
+        const effectiveType = connection?.effectiveType || '';
+        const vh = Math.max(window.innerHeight || 0, window.innerWidth || 0);
+
+        const list = [...qualities].sort((a, b) => (a.height || 0) - (b.height || 0));
+
+        let target = 720;
+        if (saveData || /(^|[^a-z])2g|slow-2g/.test(effectiveType)) target = 360;
+        else if (/3g/.test(effectiveType)) target = 480;
+        else if (vh <= 800) target = 480;
+        else if (vh >= 1200) target = 1080;
+
+        const selected = list.find((item) => (item.height || 0) >= target) || list[list.length - 1];
+        return selected?.label || 'Original';
+    }
+
+    _getQualitySources() {
+        const candidates = [
+            this.classData?.videoQualities,
+            this.classData?.qualities,
+            this.classData?.videoSources,
+            this.classData?.sources,
+            this.classData?.streams,
+            this.classData?.files?.videoQualities,
+            this.classData?.files?.qualities,
+            this.classData?.files?.videoSources,
+            this.classData?.files?.sources,
+            this.classData?.files?.streams,
+        ];
+
+        const normalized = [];
+
+        const normalizeItem = (item, fallbackLabel = '') => {
+            if (!item) return null;
+            if (typeof item === 'string') {
+                return {
+                    label: fallbackLabel || 'Original',
+                    url: item,
+                    height: parseInt(String(fallbackLabel).replace(/[^\d]/g, ''), 10) || 0,
+                };
+            }
+
+            const rawUrl = item.url || item.src || item.path || item.video;
+            const fileRef = item.fileId || item.file || item.id;
+            const url = rawUrl || (fileRef ? ApiService.getVideoUrl(fileRef) : null);
+            if (!url) return null;
+
+            const numericHeight = parseInt(item.height || item.resolution || item.quality || 0, 10);
+            const rawLabel = item.label || item.name || (numericHeight ? `${numericHeight}p` : fallbackLabel || 'Original');
+            const parsedFromLabel = parseInt(String(rawLabel).replace(/[^\d]/g, ''), 10) || 0;
+
+            return {
+                label: String(rawLabel).replace(/\s+/g, ' ').trim(),
+                url,
+                height: numericHeight || parsedFromLabel || 0,
+            };
+        };
+
+        candidates.forEach((candidate) => {
+            if (!candidate) return;
+
+            if (Array.isArray(candidate)) {
+                candidate.forEach((item) => {
+                    const parsed = normalizeItem(item);
+                    if (parsed) normalized.push(parsed);
+                });
+                return;
+            }
+
+            if (typeof candidate === 'object') {
+                Object.entries(candidate).forEach(([key, value]) => {
+                    const parsed = normalizeItem(value, key);
+                    if (parsed) normalized.push(parsed);
+                });
+            }
+        });
+
+        if (this.videoUrl && !normalized.some((q) => q.url === this.videoUrl)) {
+            normalized.push({ label: 'Original', url: this.videoUrl, height: 0 });
+        }
+
+        const uniqueByUrl = [];
+        const seen = new Set();
+        normalized.forEach((item) => {
+            if (!item?.url || seen.has(item.url)) return;
+            seen.add(item.url);
+            uniqueByUrl.push(item);
+        });
+
+        return uniqueByUrl.sort((a, b) => (b.height || 0) - (a.height || 0));
     }
 
     async render() {
@@ -47,6 +154,9 @@ export default class PlayerView {
         const backHash = this.routeData?.isCourse
             ? `#route/${this.catIdx}/${this.routeIdx}`
             : `#course/${this.catIdx}/${this.routeIdx}/${this.courseIdx}`;
+
+        const qualitySources = this._getQualitySources();
+        this._recommendedQualityLabel = this._getRecommendedQualityLabel(qualitySources);
 
         return `
             <div class="view-player fade-in">
@@ -96,9 +206,6 @@ export default class PlayerView {
                                             <svg id="ytIconPlay" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                             <svg id="ytIconPause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
                                         </button>
-                                        <button class="yt-btn" onclick="window.__playerView.navigateClass(1)" title="Siguiente">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zm-10 6l8.5 6V6z" transform="scale(-1,1) translate(-24,0)"/></svg>
-                                        </button>
                                         <div class="yt-volume-group">
                                             <button class="yt-btn" id="ytMuteBtn" title="Silenciar">
                                                 <svg id="ytIconVol" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8.14v7.72A4.49 4.49 0 0016.5 12zM14 3.23v2.06a6.5 6.5 0 010 13.42v2.06A8.51 8.51 0 0022 12 8.51 8.51 0 0014 3.23z"/></svg>
@@ -114,6 +221,22 @@ export default class PlayerView {
                                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM7 15h3c.55 0 1-.45 1-1v-1H9.5v.5h-2v-3h2v.5H11v-1c0-.55-.45-1-1-1H7c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1zm7 0h3c.55 0 1-.45 1-1v-1h-1.5v.5h-2v-3h2v.5H18v-1c0-.55-.45-1-1-1h-3c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1z"/></svg>
                                         </button>
                                         ` : ''}
+                                        ${qualitySources.length > 0 ? `
+                                        <div class="yt-quality-wrap" id="ytQualityWrap">
+                                            <button class="yt-btn yt-quality-btn" id="ytQualityBtn" title="Calidad">Auto (${this._recommendedQualityLabel})</button>
+                                            <div class="yt-quality-menu" id="ytQualityMenu">
+                                                <button class="yt-quality-option active" data-quality="auto" data-label="${this._recommendedQualityLabel}">
+                                                    <span>Auto</span>
+                                                    <small>${this._recommendedQualityLabel}</small>
+                                                </button>
+                                                ${qualitySources.map((source) => `
+                                                    <button class="yt-quality-option" data-quality="manual" data-label="${source.label}" data-url="${source.url}">
+                                                        ${source.label}
+                                                    </button>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                        ` : ''}
                                         <button class="yt-btn" onclick="window.__playerView.openInExternalPlayer()" title="Abrir en Reproductor Externo (VLC)">
                                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                                         </button>
@@ -126,6 +249,27 @@ export default class PlayerView {
                                 </div>
                             </div>
                             ` : ''}
+
+                            ${this.videoUrl ? `
+                                <button
+                                    class="player-sidebar-fab"
+                                    id="playerSidebarFab"
+                                    onclick="window.__playerView.toggleSidebar(event)"
+                                    title="Ocultar/Mostrar temario"
+                                    aria-label="Ocultar/Mostrar temario"
+                                    aria-pressed="false"
+                                >
+                                    <span class="player-sidebar-fab-icon" aria-hidden="true">
+                                        <svg class="fab-frame" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+                                            <path d="M9 4v16"></path>
+                                        </svg>
+                                        <svg class="fab-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M14 6l-6 6 6 6"></path>
+                                        </svg>
+                                    </span>
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
 
@@ -136,13 +280,7 @@ export default class PlayerView {
                             <p class="player-course-name">${this.courseData?.name || ''}</p>
                         </div>
                         <div class="player-actions">
-                            ${this.videoUrl ? `
-                            <button class="btn-action-pill" onclick="window.__playerView.openInExternalPlayer()">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/></svg>
-                                Abrir Externo
-                            </button>
-                            ` : ''}
-                            <a href="${backHash}" class="btn-action-pill">
+                            <a href="${backHash}" class="btn-action-pill btn-back">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m7-7l-7 7 7 7"/></svg>
                                 Volver
                             </a>
@@ -158,8 +296,20 @@ export default class PlayerView {
 
                 <aside class="player-sidebar">
                     <div class="sidebar-header">
-                        <h3>📋 Temario</h3>
-                        <p class="sidebar-subtitle">${this.courseData?.name || ''}</p>
+                        <div class="sidebar-header-main">
+                            <h3>📋 Temario</h3>
+                            <p class="sidebar-subtitle">${this.courseData?.name || ''}</p>
+                        </div>
+                        <button
+                            class="sidebar-classes-toggle"
+                            id="sidebarClassesToggle"
+                            onclick="window.__playerView.toggleSidebarClasses(event)"
+                            title="Ocultar/Mostrar clases"
+                            aria-label="Ocultar/Mostrar clases"
+                            aria-pressed="false"
+                        >
+                            <span id="sidebarClassesToggleIcon">▼</span>
+                        </button>
                     </div>
                     <div class="sidebar-content">
                         ${this.renderSidebar()}
@@ -185,12 +335,6 @@ export default class PlayerView {
         const resources = this.classData.resources || [];
         const hasAnyResource = summaryUrl || readingUrl || htmlUrl || resources.length > 0;
         if (!hasAnyResource) return '';
-
-        // Quick-access pills
-        const pills = [];
-        if (readingUrl) pills.push(`<a href="${readingUrl}" target="_blank" class="resource-pill"><span class="rp-icon">📚</span> Lecturas recomendadas</a>`);
-        if (summaryUrl) pills.push(`<a href="${summaryUrl}" target="_blank" class="resource-pill"><span class="rp-icon">📝</span> Resumen</a>`);
-        if (htmlUrl) pills.push(`<a href="${htmlUrl}" target="_blank" class="resource-pill"><span class="rp-icon">🌐</span> Contenido HTML</a>`);
 
         // Resource file list
         let fileListHtml = '';
@@ -245,16 +389,36 @@ export default class PlayerView {
             </div>
         ` : '';
 
+        const readingFrame = readingUrl ? `
+            <div class="resources-summary collapsed">
+                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                    <span>📚 Lecturas recomendadas</span>
+                    <span class="rs-toggle">▼</span>
+                </div>
+                <div class="rs-content">
+                    <iframe src="${readingUrl}" class="summary-frame" title="Lecturas recomendadas"></iframe>
+                </div>
+            </div>
+        ` : '';
+
+        const htmlFrame = htmlUrl ? `
+            <div class="resources-summary collapsed">
+                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                    <span>🌐 Contenido HTML</span>
+                    <span class="rs-toggle">▼</span>
+                </div>
+                <div class="rs-content">
+                    <iframe src="${htmlUrl}" class="summary-frame" title="Contenido HTML"></iframe>
+                </div>
+            </div>
+        ` : '';
+
         return `
             <div class="player-resources-section">
-                ${pills.length > 0 ? `
-                    <div class="resources-pills-row">
-                        <span class="resources-label">Recursos:</span>
-                        ${pills.join('')}
-                    </div>
-                ` : ''}
                 ${fileListHtml}
                 ${summaryFrame}
+                ${readingFrame}
+                ${htmlFrame}
             </div>
         `;
     }
@@ -341,10 +505,104 @@ export default class PlayerView {
     }
 
     async openInExternalPlayer() {
-        // Open video in new tab for download (Drive API streaming)
-        if (this.videoUrl) {
-            window.open(this.videoUrl, '_blank');
+        if (!this.videoUrl) return;
+
+        const streamUrl = this.videoUrl;
+        const ua = navigator.userAgent || '';
+        const isAndroid = /Android/i.test(ua);
+        const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+        const fallbackOpen = () => {
+            window.open(streamUrl, '_blank', 'noopener,noreferrer');
+        };
+
+        const copyLink = async () => {
+            if (!navigator.clipboard?.writeText) return;
+            try {
+                await navigator.clipboard.writeText(streamUrl);
+            } catch {
+                // Ignore clipboard errors
+            }
+        };
+
+        if (isAndroid) {
+            const noScheme = streamUrl.replace(/^https?:\/\//i, '');
+            const scheme = streamUrl.startsWith('https://') ? 'https' : 'http';
+            const vlcIntent = `intent://${noScheme}#Intent;scheme=${scheme};package=org.videolan.vlc;action=android.intent.action.VIEW;type=video/*;end`;
+
+            await copyLink();
+            window.location.href = vlcIntent;
+            setTimeout(fallbackOpen, 900);
+            return;
         }
+
+        if (isIOS) {
+            const iosVlc = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(streamUrl)}`;
+
+            await copyLink();
+            window.location.href = iosVlc;
+            setTimeout(fallbackOpen, 900);
+            return;
+        }
+
+        const desktopVlc = `vlc://${streamUrl.replace(/^https?:\/\//i, '')}`;
+        await copyLink();
+        window.location.href = desktopVlc;
+        setTimeout(fallbackOpen, 700);
+    }
+
+    _syncSidebarToggleButtons() {
+        const view = document.querySelector('.view-player');
+        const fab = document.getElementById('playerSidebarFab');
+        if (!view || !fab) return;
+
+        const collapsed = view.classList.contains('sidebar-collapsed');
+        fab.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+        fab.setAttribute('title', collapsed ? 'Mostrar temario' : 'Ocultar temario');
+        fab.setAttribute('aria-label', collapsed ? 'Mostrar temario' : 'Ocultar temario');
+        fab.classList.toggle('is-collapsed', collapsed);
+    }
+
+    toggleSidebar(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        if (this._isTouchMode) return;
+
+        const view = document.querySelector('.view-player');
+        if (!view) return;
+        view.classList.toggle('sidebar-collapsed');
+        this._syncSidebarToggleButtons();
+    }
+
+    _syncSidebarClassesToggleButtons() {
+        const view = document.querySelector('.view-player');
+        const toggle = document.getElementById('sidebarClassesToggle');
+        const icon = document.getElementById('sidebarClassesToggleIcon');
+        if (!view || !toggle || !icon) return;
+
+        const collapsed = view.classList.contains('sidebar-classes-collapsed');
+        toggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+        toggle.setAttribute('title', collapsed ? 'Mostrar clases' : 'Ocultar clases');
+        toggle.setAttribute('aria-label', collapsed ? 'Mostrar clases' : 'Ocultar clases');
+        icon.textContent = collapsed ? '▲' : '▼';
+    }
+
+    toggleSidebarClasses(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        if (!this._isTouchMode) return;
+
+        const view = document.querySelector('.view-player');
+        if (!view) return;
+
+        view.classList.toggle('sidebar-classes-collapsed');
+        this._syncSidebarClassesToggleButtons();
     }
 
     // ─── YouTube-style custom controls logic ───
@@ -369,6 +627,9 @@ export default class PlayerView {
         const fullscreenBtn = document.getElementById('ytFullscreen');
         const iconExpand = document.getElementById('ytIconExpand');
         const iconCompress = document.getElementById('ytIconCompress');
+        const qualityWrap = document.getElementById('ytQualityWrap');
+        const qualityBtn = document.getElementById('ytQualityBtn');
+        const qualityMenu = document.getElementById('ytQualityMenu');
         const overlay = document.getElementById('videoOverlay');
         const controls = document.getElementById('ytControls');
 
@@ -489,6 +750,76 @@ export default class PlayerView {
             });
         }
 
+        // Quality menu
+        if (qualityWrap && qualityBtn && qualityMenu) {
+            const qualitySources = this._getQualitySources();
+            const sourceTag = video.querySelector('source');
+
+            const setActiveQualityOption = (mode, label) => {
+                qualityMenu.querySelectorAll('.yt-quality-option').forEach((option) => {
+                    const isAuto = mode === 'auto' && option.dataset.quality === 'auto';
+                    const isManual = mode === 'manual'
+                        && option.dataset.quality === 'manual'
+                        && option.dataset.label === label;
+                    option.classList.toggle('active', isAuto || isManual);
+                });
+            };
+
+            const applyQuality = (url, label, mode) => {
+                if (!url) return;
+
+                const previousTime = video.currentTime || 0;
+                const wasPaused = video.paused;
+
+                video.pause();
+                if (sourceTag) sourceTag.src = url;
+                video.src = url;
+                video.load();
+
+                video.addEventListener('loadedmetadata', () => {
+                    if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < video.duration) {
+                        video.currentTime = previousTime;
+                    }
+                    if (!wasPaused) video.play().catch(() => {});
+                }, { once: true });
+
+                qualityBtn.textContent = mode === 'auto' ? `Auto (${label})` : label;
+                setActiveQualityOption(mode, label);
+                qualityWrap.classList.remove('open');
+            };
+
+            qualityBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                qualityWrap.classList.toggle('open');
+            });
+
+            qualityMenu.addEventListener('click', (event) => {
+                const option = event.target.closest('.yt-quality-option');
+                if (!option) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                if (option.dataset.quality === 'auto') {
+                    const recommended = this._recommendedQualityLabel || this._getRecommendedQualityLabel(qualitySources);
+                    const fallback = qualitySources[qualitySources.length - 1];
+                    const selected = qualitySources.find((item) => item.label === recommended) || fallback;
+                    if (selected) applyQuality(selected.url, recommended, 'auto');
+                    return;
+                }
+
+                const selectedUrl = option.dataset.url;
+                const selectedLabel = option.dataset.label || 'Original';
+                applyQuality(selectedUrl, selectedLabel, 'manual');
+            });
+
+            this._qualityOutsideHandler = (event) => {
+                if (!qualityWrap.contains(event.target)) qualityWrap.classList.remove('open');
+            };
+            document.addEventListener('click', this._qualityOutsideHandler);
+        }
+
         // Fullscreen (proper API on the wrapper, not video element)
         const wrapper = document.getElementById('videoWrapper');
         fullscreenBtn.addEventListener('click', () => {
@@ -564,6 +895,38 @@ export default class PlayerView {
             this._setupCustomControls();
         }
 
+        this._isTouchMode = this._isTouchDevice();
+        const view = document.querySelector('.view-player');
+        if (view) {
+            view.classList.toggle('touch-mode', this._isTouchMode);
+            if (this._isTouchMode) {
+                view.classList.remove('sidebar-collapsed');
+            } else {
+                view.classList.remove('sidebar-classes-collapsed');
+            }
+        }
+        this._syncSidebarToggleButtons();
+        this._syncSidebarClassesToggleButtons();
+
+        this._viewportModeHandler = () => {
+            const touchNow = this._isTouchDevice();
+            if (touchNow === this._isTouchMode) return;
+            this._isTouchMode = touchNow;
+
+            const playerView = document.querySelector('.view-player');
+            if (!playerView) return;
+            playerView.classList.toggle('touch-mode', this._isTouchMode);
+
+            if (this._isTouchMode) {
+                playerView.classList.remove('sidebar-collapsed');
+            } else {
+                playerView.classList.remove('sidebar-classes-collapsed');
+            }
+            this._syncSidebarToggleButtons();
+            this._syncSidebarClassesToggleButtons();
+        };
+        window.addEventListener('resize', this._viewportModeHandler);
+
         // Keyboard shortcuts
         this._keyHandler = (e) => {
             const video = document.getElementById('mainVideo');
@@ -600,6 +963,8 @@ export default class PlayerView {
 
     destroy() {
         if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+        if (this._viewportModeHandler) window.removeEventListener('resize', this._viewportModeHandler);
+        if (this._qualityOutsideHandler) document.removeEventListener('click', this._qualityOutsideHandler);
         if (this._fsChangeHandler) {
             document.removeEventListener('fullscreenchange', this._fsChangeHandler);
             document.removeEventListener('webkitfullscreenchange', this._fsChangeHandler);

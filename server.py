@@ -6,6 +6,7 @@ Course structure is loaded from courses_cache.json (built by rebuild_cache_drive
 
 import os
 import json
+import re
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote
 import mimetypes
@@ -23,6 +24,86 @@ cache_lock = threading.Lock()
 
 # Google Drive service (lazy loaded)
 _drive_service = None
+DRIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{10,}$')
+
+
+def analyze_drive_references(data):
+    """Validate that file references in cache are Drive IDs (not local refs)."""
+    summary = {
+        'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'totalRefs': 0,
+        'validDriveRefs': 0,
+        'localRefs': 0,
+        'invalidRefs': 0,
+        'emptyRefs': 0,
+        'issues': []
+    }
+
+    def add_issue(location, value, reason):
+        if len(summary['issues']) < 30:
+            summary['issues'].append({
+                'location': location,
+                'value': value,
+                'reason': reason
+            })
+
+    def validate_ref(ref, location):
+        summary['totalRefs'] += 1
+
+        if ref is None:
+            summary['emptyRefs'] += 1
+            return
+
+        if not isinstance(ref, str):
+            summary['invalidRefs'] += 1
+            add_issue(location, str(ref), 'non_string_ref')
+            return
+
+        value = ref.strip()
+        if not value:
+            summary['emptyRefs'] += 1
+            return
+
+        if value.startswith('local:'):
+            summary['localRefs'] += 1
+            add_issue(location, value, 'local_ref_detected')
+            return
+
+        if value.startswith('http://') or value.startswith('https://'):
+            summary['invalidRefs'] += 1
+            add_issue(location, value, 'url_ref_detected')
+            return
+
+        if not DRIVE_ID_RE.match(value):
+            summary['invalidRefs'] += 1
+            add_issue(location, value, 'invalid_drive_id_format')
+            return
+
+        summary['validDriveRefs'] += 1
+
+    categories = (data or {}).get('categories', [])
+    for cat_idx, category in enumerate(categories):
+        routes = category.get('routes', [])
+        for route_idx, route in enumerate(routes):
+            courses = [route] if route.get('isCourse') else route.get('courses', [])
+            for course_idx, course in enumerate(courses):
+                modules = course.get('modules', [])
+                for mod_idx, module in enumerate(modules):
+                    classes = module.get('classes', [])
+                    for cls_idx, cls in enumerate(classes):
+                        files = cls.get('files', {}) or {}
+                        for field_name, ref in files.items():
+                            validate_ref(ref, f'cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].files.{field_name}')
+
+                        resources = cls.get('resources', []) or []
+                        for res_idx, resource in enumerate(resources):
+                            validate_ref(resource.get('file'), f'cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].resources[{res_idx}].file')
+
+    summary['ok'] = summary['localRefs'] == 0 and summary['invalidRefs'] == 0
+    summary['message'] = 'drive_only_ok' if summary['ok'] else 'drive_only_issues_found'
+    return summary
+
+
 def get_drive_service():
     global _drive_service
     if _drive_service is None:
@@ -114,10 +195,28 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             
             self.wfile.write(data.encode('utf-8'))
             return
+
+        # Self-check: validate cache references are Drive IDs (no local refs)
+        if self.path == '/api/self-check-drive':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            with cache_lock:
+                data = courses_cache or {'categories': [], 'stats': {}}
+
+            report = analyze_drive_references(data)
+            self.wfile.write(json.dumps(report, ensure_ascii=False).encode('utf-8'))
+            return
         
         # Google Drive file streaming (all files served via Drive API)
         if self.path.startswith('/drive/files/'):
             file_id = unquote(self.path[13:])
+
+            if file_id.startswith('local:'):
+                self.send_error(400, 'Local file refs are disabled in Drive mode. Rebuild cache with rebuild_cache_drive.py')
+                return
             
             if not file_id or len(file_id) < 10:
                 self.send_error(400, 'Invalid file ID')
