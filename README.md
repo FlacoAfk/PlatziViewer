@@ -235,7 +235,7 @@ credentials = Credentials.from_service_account_file(
 )
 ```
 
-- **Cuenta de servicio**: `platzi-viewer@profound-gantry-487418-u9.iam.gserviceaccount.com`
+- **Cuenta de servicio**: Configurable por archivo JSON local
 - **Scope**: Solo lectura (`drive.readonly`)
 - **No requiere OAuth del usuario**: La autenticación es automática con el archivo `service_account.json`
 - **Acceso**: La carpeta compartida de Drive debe estar compartida con el email de la cuenta de servicio
@@ -245,7 +245,7 @@ credentials = Credentials.from_service_account_file(
 | Endpoint | Método | Descripción |
 |---|---|---|
 | `/api/courses` | GET | Retorna la estructura completa de cursos (desde `courses_cache.json`) |
-| `/api/refresh` | GET | Recarga `courses_cache.json` desde disco (en background) |
+| `/api/refresh` | GET | Recarga `courses_cache.json` desde disco (solo cliente local / loopback) |
 | `/api/progress` | GET | Retorna el progreso guardado del usuario |
 | `/api/progress` | POST | Guarda el progreso del usuario en `progress.json` |
 | `/drive/files/{fileId}` | GET | Proxy a Google Drive - transmite el archivo indicado por su file ID |
@@ -262,6 +262,39 @@ credentials = Credentials.from_service_account_file(
 | Recursos | `.pdf`, `.png`, etc. | Varía | Descarga completa (HTTP 200) |
 
 ## 🛠️ Instalación y Configuración
+
+## 🧳 Crear .exe Portable (Windows)
+
+No necesitas Docker para generar el ejecutable en Windows.
+
+1. Activa tu entorno virtual (`.venv`) y verifica que exista `pyinstaller`.
+2. Ejecuta:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_portable_exe.ps1
+```
+
+3. Se generará:
+- `dist/PlatziViewer/PlatziViewer.exe`
+
+4. Antes de compartir, valida dentro de `dist/PlatziViewer`:
+- `service_account.json` (solo si quieres que funcione sin configuración manual)
+- `courses_cache.json`
+
+El `.exe` usa el icono `favicon.ico` (derivado de tu diseño `favicon.svg`).
+
+### 🪟 App de escritorio en un único EXE (sin navegador)
+
+Si quieres abrir todo como aplicación de Windows (backend + frontend juntos, ventana nativa):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_desktop_exe.ps1
+```
+
+Salida:
+- `dist/PlatziViewerDesktop.exe`
+
+Ese archivo abre la app de escritorio directamente (no pestaña de navegador).
 
 ### Prerrequisitos
 - **Python 3.7+**: Para el servidor backend
@@ -299,7 +332,7 @@ Las dependencias principales son:
    - Ir a "IAM & Admin" → "Service Accounts"
    - Crear nueva cuenta de servicio
    - Descargar la clave JSON
-4. **Colocar el archivo de credenciales** como `service_account.json` en la raíz del proyecto
+4. **Colocar el archivo de credenciales** como `service_account.json` en la raíz del proyecto **o** definir `GOOGLE_SERVICE_ACCOUNT_FILE` en `.env`
 5. **Compartir la carpeta de Drive** con el email de la cuenta de servicio (con permiso de lectura)
 
 ### Paso 4: Construir el Caché de Cursos
@@ -312,6 +345,8 @@ Este proceso escanea toda la estructura de carpetas en Drive y genera `courses_c
 ```bash
 python server.py
 ```
+
+Opcionalmente puedes configurar variables de entorno copiando `.env.example` a `.env`.
 
 ### Paso 6: Acceder a la Aplicación
 - Abrir `http://localhost:8080` en el navegador
@@ -413,6 +448,14 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 - **Caché grande en memoria**: `courses_cache.json` (~20MB) se carga completamente en RAM. En sistemas con poca memoria, esto podría ser un problema.
 - **Tiempo de escaneo**: La primera construcción del caché puede tomar 15-30 minutos por la cantidad de llamadas a la API.
 
+## 🔐 Seguridad al Compartir con Familiares
+
+- Mantén `service_account.json` fuera del repositorio y compártelo por canal privado.
+- El servidor usa permisos de solo lectura (`drive.readonly`), sin operaciones de escritura o borrado en Drive.
+- El endpoint `/api/refresh` está restringido a loopback para evitar recargas remotas.
+- `progress.json` ahora valida tamaño máximo de payload para reducir abuso.
+- Antes de compartir, confirma que no incluyes: `service_account.json`, `drive_scan_progress.json`, `server_metadata.json`, `rebuild_log.txt`.
+
 ## 📋 Roadmap de Desarrollo
 
 ### v1.1 - Optimizaciones
@@ -421,7 +464,6 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 - [ ] Caché local de archivos Drive frecuentes
 
 ### v1.2 - Mejoras de Funcionalidad
-- [ ] Migrar completamente a app_v2.js
 - [ ] Implementar PWA completo con service worker
 - [ ] Mejorar sincronización de progreso
 

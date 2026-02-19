@@ -1,4 +1,4 @@
-import { ApiService } from './api.js';
+import { ApiService, API_URL } from './api.js';
 
 class StateService {
     constructor() {
@@ -6,16 +6,107 @@ class StateService {
         this.progress = {};
         this.storageKey = 'platzi_progress';
         this.listeners = [];
+        this._syncTimer = null;
     }
 
     async init() {
         // Load courses data (required)
         this.coursesData = await ApiService.getCourses();
 
-        // Load progress from localStorage only (server uses SSE, not JSON)
-        this.progress = this.loadLocalProgress();
+        const localProgress = this.loadLocalProgress();
+        const serverProgress = await this.loadServerProgress();
+
+        this.progress = this.mergeProgress(localProgress, serverProgress);
+        this.saveProgress({ syncServer: false });
 
         console.log('✅ State Initialized:', this.coursesData?.stats);
+    }
+
+    async loadServerProgress() {
+        try {
+            const response = await fetch(`${API_URL}/api/progress`, { cache: 'no-store' });
+            if (!response.ok) return {};
+            const data = await response.json();
+            return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+        } catch (e) {
+            console.warn('Error loading server progress:', e);
+            return {};
+        }
+    }
+
+    _statusRank(status) {
+        if (status === 'complete') return 2;
+        if (status === 'in_progress') return 1;
+        return 0;
+    }
+
+    _recordTimestamp(record) {
+        if (!record || typeof record !== 'object') return 0;
+        const raw = record.completedAt || record.lastWatched || '';
+        const ts = raw ? Date.parse(raw) : NaN;
+        return Number.isFinite(ts) ? ts : 0;
+    }
+
+    mergeProgress(localProgress, serverProgress) {
+        const local = localProgress && typeof localProgress === 'object' ? localProgress : {};
+        const server = serverProgress && typeof serverProgress === 'object' ? serverProgress : {};
+        const merged = {};
+        const keys = new Set([...Object.keys(local), ...Object.keys(server)]);
+
+        keys.forEach((key) => {
+            const localRecord = local[key];
+            const serverRecord = server[key];
+
+            if (!localRecord) {
+                merged[key] = serverRecord;
+                return;
+            }
+            if (!serverRecord) {
+                merged[key] = localRecord;
+                return;
+            }
+
+            const localRank = this._statusRank(localRecord.status);
+            const serverRank = this._statusRank(serverRecord.status);
+
+            if (localRank > serverRank) {
+                merged[key] = localRecord;
+                return;
+            }
+            if (serverRank > localRank) {
+                merged[key] = serverRecord;
+                return;
+            }
+
+            merged[key] = this._recordTimestamp(serverRecord) >= this._recordTimestamp(localRecord)
+                ? serverRecord
+                : localRecord;
+        });
+
+        return merged;
+    }
+
+    queueServerSync() {
+        if (this._syncTimer) {
+            clearTimeout(this._syncTimer);
+        }
+
+        this._syncTimer = setTimeout(() => {
+            this._syncTimer = null;
+            this.saveServerProgress();
+        }, 400);
+    }
+
+    async saveServerProgress() {
+        try {
+            await fetch(`${API_URL}/api/progress`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.progress)
+            });
+        } catch (e) {
+            console.warn('Error saving server progress:', e);
+        }
     }
 
     loadLocalProgress() {
@@ -27,12 +118,17 @@ class StateService {
         }
     }
 
-    saveProgress() {
+    saveProgress({ syncServer = true } = {}) {
         try {
             localStorage.setItem(this.storageKey, JSON.stringify(this.progress));
         } catch (e) {
             console.error('Error saving progress:', e);
         }
+
+        if (syncServer) {
+            this.queueServerSync();
+        }
+
         this.notifyListeners();
     }
 

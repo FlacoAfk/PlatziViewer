@@ -1,4 +1,4 @@
-export const API_URL = 'http://localhost:8080';
+export const API_URL = window.location?.origin || 'http://localhost:8080';
 
 export class ApiService {
     static _normalizeDriveRef(fileRef) {
@@ -11,7 +11,7 @@ export class ApiService {
     static async getCourses(retries = 30) {
         for (let i = 0; i < retries; i++) {
             try {
-                const response = await fetch(`${API_URL}/api/courses`);
+                const response = await fetch(`${API_URL}/api/courses`, { cache: 'no-store' });
                 if (!response.ok) throw new Error('Server error');
                 const data = await response.json();
 

@@ -508,6 +508,26 @@ export default class PlayerView {
         if (!this.videoUrl) return;
 
         const streamUrl = this.videoUrl;
+
+        // 1. Try to open via backend (local server functionality)
+        try {
+            const response = await fetch('/api/open-external', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: streamUrl })
+            });
+
+            if (response.ok) {
+                console.log('Opened in external player via backend');
+                return;
+            } else {
+                console.warn('Backend failed to open external player, falling back to client-side');
+            }
+        } catch (e) {
+            console.warn('Network/API error opening external player:', e);
+        }
+
+        // 2. Fallback to client-side protocol handlers (Mobile / Default behavior)
         const ua = navigator.userAgent || '';
         const isAndroid = /Android/i.test(ua);
         const isIOS = /iPhone|iPad|iPod/i.test(ua);
@@ -780,7 +800,7 @@ export default class PlayerView {
                     if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < video.duration) {
                         video.currentTime = previousTime;
                     }
-                    if (!wasPaused) video.play().catch(() => {});
+                    if (!wasPaused) video.play().catch(() => { });
                 }, { once: true });
 
                 qualityBtn.textContent = mode === 'auto' ? `Auto (${label})` : label;
@@ -874,7 +894,7 @@ export default class PlayerView {
         if (video) {
             // Fix audio/video sync: wait for metadata then play
             const startPlayback = () => {
-                video.play().catch(() => {});
+                video.play().catch(() => { });
             };
             if (video.readyState >= 1) {
                 startPlayback();
@@ -961,7 +981,36 @@ export default class PlayerView {
         document.addEventListener('keydown', this._keyHandler);
     }
 
+    _stopVideoPlayback() {
+        const video = document.getElementById('mainVideo');
+        if (!video) return;
+
+        try {
+            video.pause();
+        } catch (e) {
+            // no-op
+        }
+
+        try {
+            video.removeAttribute('src');
+            const source = video.querySelector('source');
+            if (source) source.removeAttribute('src');
+            video.load();
+        } catch (e) {
+            // no-op
+        }
+
+        try {
+            if (document.fullscreenElement) {
+                (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
+            }
+        } catch (e) {
+            // no-op
+        }
+    }
+
     destroy() {
+        this._stopVideoPlayback();
         if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
         if (this._viewportModeHandler) window.removeEventListener('resize', this._viewportModeHandler);
         if (this._qualityOutsideHandler) document.removeEventListener('click', this._qualityOutsideHandler);

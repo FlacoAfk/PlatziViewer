@@ -50,6 +50,10 @@ yarn-error.log*
 
 # Cache and temporary files
 courses_cache.json
+server_metadata.json
+drive_scan_progress.json
+rebuild_log.txt
+root_id.txt
 *.tmp
 *.temp
 .cache/

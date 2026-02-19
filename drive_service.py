@@ -1,17 +1,18 @@
 
 import os.path
-import io
-import google.auth
-from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 from google.auth.transport.requests import AuthorizedSession
 import threading
+import re
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), 'service_account.json')
+SERVICE_ACCOUNT_FILE = os.environ.get(
+    'GOOGLE_SERVICE_ACCOUNT_FILE',
+    os.path.join(os.path.dirname(__file__), 'service_account.json')
+)
+DRIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{10,}$')
 
 class DriveService:
     def __init__(self):
@@ -21,14 +22,19 @@ class DriveService:
 
     def authenticate(self):
         if os.path.exists(SERVICE_ACCOUNT_FILE):
-             self.creds = Credentials.from_service_account_file(
+            self.creds = Credentials.from_service_account_file(
                 SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         else:
-            raise Exception("service_account.json not found")
+            raise Exception(f"Service account file not found: {SERVICE_ACCOUNT_FILE}")
+
+    def _validate_drive_id(self, value, field_name='id'):
+        if not isinstance(value, str) or not DRIVE_ID_RE.match(value.strip()):
+            raise ValueError(f'Invalid Google Drive {field_name}')
+        return value.strip()
 
     def get_service(self):
         if not hasattr(self._thread_local, 'service'):
-            self._thread_local.service = build('drive', 'v3', credentials=self.creds)
+            self._thread_local.service = build('drive', 'v3', credentials=self.creds, cache_discovery=False)
         return self._thread_local.service
 
     def find_folder(self, name, parent_id=None):
@@ -51,6 +57,7 @@ class DriveService:
 
     def list_files(self, folder_id):
         """Lista archivos y carpetas en un directorio con reintentos."""
+        folder_id = self._validate_drive_id(folder_id, 'folder_id')
         files_list = []
         page_token = None
         query = f"'{folder_id}' in parents and trashed = false"
@@ -98,6 +105,7 @@ class DriveService:
         return files_list
 
     def get_file_metadata(self, file_id):
+        file_id = self._validate_drive_id(file_id, 'file_id')
         service = self.get_service()
         retry_count = 0
         max_retries = 3
@@ -122,6 +130,7 @@ class DriveService:
 
     def download_file_range(self, file_id, start=None, end=None):
         """Descarga un rango de bytes de un archivo."""
+        file_id = self._validate_drive_id(file_id, 'file_id')
         # build the URL manually to use with requests/authorized session?
         # OR use api client.
         # using requests is better for streaming?
@@ -143,15 +152,15 @@ class DriveService:
         # Let's create a thread-local session too.
         
         if not hasattr(self._thread_local, 'session'):
-             self._thread_local.session = AuthorizedSession(self.creds)
+            self._thread_local.session = AuthorizedSession(self.creds)
         
         session = self._thread_local.session
         
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         headers = {}
         if start is not None or end is not None:
-             range_header = f"bytes={start if start is not None else ''}-{end if end is not None else ''}"
-             headers['Range'] = range_header
+            range_header = f"bytes={start if start is not None else ''}-{end if end is not None else ''}"
+            headers['Range'] = range_header
 
         response = session.get(url, headers=headers, stream=True, timeout=(5, 15))
         response.raise_for_status()

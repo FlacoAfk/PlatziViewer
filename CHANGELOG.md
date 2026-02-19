@@ -107,7 +107,7 @@ This marks the first stable release of Platzi Viewer. The application provides a
 - Google Drive integration for remote content
 
 **Architecture:**
-- Dual implementation: Legacy monolithic (app.js) and modular (app_v2.js)
+- Modular implementation based on ES modules (app_v2.js)
 - Component-based UI architecture
 - Service-oriented backend design
 - RESTful API endpoints
