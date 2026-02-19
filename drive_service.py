@@ -113,6 +113,13 @@ class DriveService:
                 time.sleep(wait_time)
         raise Exception(f"Failed to get metadata for {file_id}")
 
+    def is_folder(self, file_metadata):
+        return file_metadata.get('mimeType') == 'application/vnd.google-apps.folder'
+
+    def list_files_with_metadata(self, folder_id):
+        """Lista archivos con metadata detallada."""
+        return self.list_files(folder_id)
+
     def download_file_range(self, file_id, start=None, end=None):
         """Descarga un rango de bytes de un archivo."""
         # build the URL manually to use with requests/authorized session?

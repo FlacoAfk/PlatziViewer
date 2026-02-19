@@ -186,44 +186,13 @@ export default class PlayerView {
         const hasAnyResource = summaryUrl || readingUrl || htmlUrl || resources.length > 0;
         if (!hasAnyResource) return '';
 
-        // Collapsible iframe sections for reading, summary, and html
-        const readingFrame = readingUrl ? `
-            <div class="resources-summary collapsed">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                    <span>📚 Lecturas recomendadas</span>
-                    <span class="rs-toggle">▼</span>
-                </div>
-                <div class="rs-content">
-                    <iframe src="${readingUrl}" class="summary-frame"></iframe>
-                </div>
-            </div>
-        ` : '';
+        // Quick-access pills
+        const pills = [];
+        if (readingUrl) pills.push(`<a href="${readingUrl}" target="_blank" class="resource-pill"><span class="rp-icon">📚</span> Lecturas recomendadas</a>`);
+        if (summaryUrl) pills.push(`<a href="${summaryUrl}" target="_blank" class="resource-pill"><span class="rp-icon">📝</span> Resumen</a>`);
+        if (htmlUrl) pills.push(`<a href="${htmlUrl}" target="_blank" class="resource-pill"><span class="rp-icon">🌐</span> Contenido HTML</a>`);
 
-        const summaryFrame = summaryUrl ? `
-            <div class="resources-summary collapsed">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                    <span>📄 Resumen de la clase</span>
-                    <span class="rs-toggle">▼</span>
-                </div>
-                <div class="rs-content">
-                    <iframe src="${summaryUrl}" class="summary-frame"></iframe>
-                </div>
-            </div>
-        ` : '';
-
-        const htmlFrame = htmlUrl ? `
-            <div class="resources-summary collapsed">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                    <span>🌐 Contenido HTML</span>
-                    <span class="rs-toggle">▼</span>
-                </div>
-                <div class="rs-content">
-                    <iframe src="${htmlUrl}" class="summary-frame"></iframe>
-                </div>
-            </div>
-        ` : '';
-
-        // Resource file list (download cards)
+        // Resource file list
         let fileListHtml = '';
         if (resources.length > 0) {
             const fileItems = resources.map(r => {
@@ -263,12 +232,29 @@ export default class PlayerView {
             `;
         }
 
+        // Summary iframe (always open if available)
+        const summaryFrame = summaryUrl ? `
+            <div class="resources-summary">
+                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                    <span>📄 Resumen de la clase</span>
+                    <span class="rs-toggle">▼</span>
+                </div>
+                <div class="rs-content">
+                    <iframe src="${summaryUrl}" class="summary-frame"></iframe>
+                </div>
+            </div>
+        ` : '';
+
         return `
             <div class="player-resources-section">
-                ${readingFrame}
-                ${summaryFrame}
-                ${htmlFrame}
+                ${pills.length > 0 ? `
+                    <div class="resources-pills-row">
+                        <span class="resources-label">Recursos:</span>
+                        ${pills.join('')}
+                    </div>
+                ` : ''}
                 ${fileListHtml}
+                ${summaryFrame}
             </div>
         `;
     }
@@ -355,34 +341,9 @@ export default class PlayerView {
     }
 
     async openInExternalPlayer() {
-        if (!this.videoFileRef) return;
-
-        try {
-            const btn = document.querySelector('.btn-action-pill');
-            const originalText = btn ? btn.innerHTML : '';
-            if (btn) btn.innerHTML = '⏳ Abriendo...';
-
-            const resp = await fetch('http://localhost:8080/api/open', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: this.videoFileRef })
-            });
-
-            if (!resp.ok) {
-                const errText = await resp.text();
-                throw new Error(errText || `HTTP ${resp.status}`);
-            }
-
-            // Restore button text after a moment
-            setTimeout(() => {
-                if (btn) btn.innerHTML = originalText;
-            }, 2000);
-        } catch (e) {
-            console.error('Error opening external player:', e);
-            // Fallback: open video URL in new tab
-            if (this.videoUrl) {
-                window.open(this.videoUrl, '_blank');
-            }
+        // Open video in new tab for download (Drive API streaming)
+        if (this.videoUrl) {
+            window.open(this.videoUrl, '_blank');
         }
     }
 
@@ -582,7 +543,7 @@ export default class PlayerView {
         if (video) {
             // Fix audio/video sync: wait for metadata then play
             const startPlayback = () => {
-                video.play().catch(() => { });
+                video.play().catch(() => {});
             };
             if (video.readyState >= 1) {
                 startPlayback();
