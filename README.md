@@ -302,6 +302,19 @@ Salida:
 
 Ese archivo abre la app de escritorio directamente (no pestaña de navegador).
 
+### ⚙️ Forzar aceleración por GPU dedicada (Windows)
+
+Para videos conflictivos, la app de escritorio ahora solicita aceleración hardware (Chromium/Qt) automáticamente. Además, en Windows puedes forzar GPU dedicada por proceso:
+
+1. Ve a **Configuración > Sistema > Pantalla > Gráficos**.
+2. Agrega `PlatziViewerDesktop.exe` (o tu navegador si usas versión web).
+3. En Opciones, selecciona **Alto rendimiento**.
+4. Reinicia la app.
+
+Notas:
+- Esto puede mejorar fluidez/decodificación, pero no corrige todos los videos con timestamps dañados.
+- Si el archivo sigue desincronizado, usa el **modo compatibilidad** o **Abrir VLC** desde el reproductor.
+
 ## Docker (backend + frontend)
 
 Puedes correr toda la app en Docker (servidor Python + frontend estatico):

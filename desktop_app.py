@@ -24,6 +24,34 @@ except Exception:
     QIcon = None
 
 
+def _configure_gpu_acceleration():
+    chromium_gpu_flags = [
+        '--ignore-gpu-blocklist',
+        '--enable-gpu-rasterization',
+        '--enable-zero-copy',
+        '--enable-accelerated-video-decode',
+        '--enable-native-gpu-memory-buffers',
+    ]
+
+    def merge_flags(existing_value):
+        existing = (existing_value or '').strip().split()
+        merged = existing[:]
+        for flag in chromium_gpu_flags:
+            if flag not in merged:
+                merged.append(flag)
+        return ' '.join(merged).strip()
+
+    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = merge_flags(
+        os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS')
+    )
+    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = merge_flags(
+        os.environ.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS')
+    )
+
+    os.environ.setdefault('QT_OPENGL', 'desktop')
+    os.environ.setdefault('QT_ANGLE_PLATFORM', 'd3d11')
+
+
 def _resource_dir():
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return sys._MEIPASS
@@ -90,6 +118,8 @@ def _run_pyqt_window(target_url, resources, exe_dir, server):
 
 
 def main():
+    _configure_gpu_acceleration()
+
     host = os.environ.get('HOST', '127.0.0.1').strip() or '127.0.0.1'
     if host == 'localhost':
         host = '127.0.0.1'
