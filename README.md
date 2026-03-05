@@ -15,8 +15,9 @@ Una aplicación web progresiva (PWA) que permite navegar, organizar y hacer segu
 ### 🎥 Reproducción de Video
 - **Streaming desde Google Drive**: Los videos se transmiten en tiempo real desde la API de Drive
 - **Soporte HTTP Range Requests**: Permite seek/buffering parcial sin descargar el archivo completo
-- **Sincronización A/V**: Monitoreo avanzado de sincronización audio/video
+- **Sincronización A/V adaptativa**: Corrección automática de drift, monitoreo por frames y ajuste dinámico para sesiones largas
 - **Navegación entre clases**: Avanzar/retroceder con atajos de teclado
+- **Cierre limpio al navegar**: Al salir del reproductor se detiene y desmonta cualquier reproducción activa (sin audio residual)
 
 ### 📊 Seguimiento de Progreso
 - **Persistencia local**: Almacenamiento en localStorage del navegador
@@ -245,6 +246,7 @@ credentials = Credentials.from_service_account_file(
 | Endpoint | Método | Descripción |
 |---|---|---|
 | `/api/courses` | GET | Retorna la estructura completa de cursos (desde `courses_cache.json`) |
+| `/api/health` | GET | Estado del servidor y disponibilidad de Drive |
 | `/api/refresh` | GET | Recarga `courses_cache.json` desde disco (solo cliente local / loopback) |
 | `/api/progress` | GET | Retorna el progreso guardado del usuario |
 | `/api/progress` | POST | Guarda el progreso del usuario en `progress.json` |
@@ -268,16 +270,20 @@ credentials = Credentials.from_service_account_file(
 No necesitas Docker para generar el ejecutable en Windows.
 
 1. Activa tu entorno virtual (`.venv`) y verifica que exista `pyinstaller`.
-2. Ejecuta:
+2. Instala dependencias de runtime si aun no estan:
+```powershell
+pip install -r requirements.txt
+```
+3. Ejecuta:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build_portable_exe.ps1
 ```
 
-3. Se generará:
+4. Se generará:
 - `dist/PlatziViewer/PlatziViewer.exe`
 
-4. Antes de compartir, valida dentro de `dist/PlatziViewer`:
+5. Antes de compartir, valida dentro de `dist/PlatziViewer`:
 - `service_account.json` (solo si quieres que funcione sin configuración manual)
 - `courses_cache.json`
 
@@ -295,6 +301,31 @@ Salida:
 - `dist/PlatziViewerDesktop.exe`
 
 Ese archivo abre la app de escritorio directamente (no pestaña de navegador).
+
+## Docker (backend + frontend)
+
+Puedes correr toda la app en Docker (servidor Python + frontend estatico):
+
+1. Crear carpetas locales:
+```bash
+mkdir secrets runtime-data
+```
+2. Copiar credenciales en `secrets/service_account.json`.
+3. Levantar contenedor:
+```bash
+docker compose up --build -d
+```
+4. Abrir `http://localhost:8080`.
+
+### Diagnostico del 503 "Drive service not available"
+
+Consulta:
+- `http://localhost:8080/api/health`
+
+Si ves `"drive": {"available": false, ...}` revisa:
+- Ruta de credenciales (`GOOGLE_SERVICE_ACCOUNT_FILE`).
+- JSON inline (`GOOGLE_SERVICE_ACCOUNT_JSON`) si no usas archivo.
+- Permisos de comparticion del Drive para la cuenta de servicio.
 
 ### Prerrequisitos
 - **Python 3.7+**: Para el servidor backend

@@ -1,0 +1,22 @@
+services:
+  platzi-viewer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: platzi-viewer:latest
+    container_name: platzi-viewer
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      PUBLIC_HOST: "localhost"
+      PLATZI_DATA_PATH: "/data"
+      # Option A (recommended): put credentials in ./secrets/service_account.json
+      GOOGLE_SERVICE_ACCOUNT_FILE: "/secrets/service_account.json"
+      # Option B: set GOOGLE_SERVICE_ACCOUNT_JSON in an .env file
+      # GOOGLE_SERVICE_ACCOUNT_JSON: "${GOOGLE_SERVICE_ACCOUNT_JSON}"
+    volumes:
+      - ./runtime-data:/data
+      - ./secrets:/secrets:ro
+    restart: unless-stopped

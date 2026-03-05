@@ -9,13 +9,19 @@ export default class PlayerView {
         this.modIdx = parseInt(params.modIdx);
         this.classIdx = parseInt(params.classIdx);
 
-        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
-        this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx);
-        this.classData = state.getClass(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
-        this.classKey = state.getClassKey(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
+        this.routeData = null;
+        this.courseData = null;
+        this.classData = null;
+        this.classKey = null;
+        this.detailErrorCode = null;
 
         this._isTouchMode = false;
         this._recommendedQualityLabel = null;
+        this._isDestroyed = false;
+        this._videoEl = null;
+        this._startPlaybackTimeout = null;
+        this._startPlaybackCanPlayHandler = null;
+        this._videoFrameCallbackId = null;
 
         window.__playerView = this;
     }
@@ -125,10 +131,37 @@ export default class PlayerView {
     }
 
     async render() {
+        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
+        this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx);
+
+        if (!this.courseData) {
+            return `
+                <div class="error-state">
+                    <h2>⚠️ Curso no encontrado</h2>
+                    <a href="#home">← Volver al inicio</a>
+                </div>
+            `;
+        }
+
+        try {
+            this.courseData = await state.ensureCourseDetail(this.catIdx, this.routeIdx, this.courseIdx) || this.courseData;
+        } catch (error) {
+            this.detailErrorCode = error?.code || 'course_detail_unavailable';
+            this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx) || this.courseData;
+        }
+
+        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
+        this.classData = state.getClass(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
+        this.classKey = state.getClassKey(this.catIdx, this.routeIdx, this.courseIdx, this.modIdx, this.classIdx);
+
         if (!this.classData) {
             return `
                 <div class="error-state">
                     <h2>⚠️ Clase no encontrada</h2>
+                    <p style="color: var(--text-muted); margin-top: .75rem;">
+                        Código: <code style="background: var(--bg-card); padding: 4px 8px; border-radius: 4px;">${this.detailErrorCode || 'course_detail_missing'}</code>
+                        • Endpoint: <code style="background: var(--bg-card); padding: 4px 8px; border-radius: 4px;">/api/course-detail/${this.catIdx}/${this.routeIdx}/${this.courseIdx}</code>
+                    </p>
                     <a href="#home">← Volver al inicio</a>
                 </div>
             `;
@@ -164,7 +197,7 @@ export default class PlayerView {
                     <div class="video-wrapper" id="videoWrapper">
                         <div class="video-container" id="videoContainer">
                             ${this.videoUrl ? `
-                                <video id="mainVideo" preload="metadata" crossorigin="anonymous" style="width:100%; height:100%; background:#000">
+                                <video id="mainVideo" preload="auto" playsinline crossorigin="anonymous" style="width:100%; height:100%; background:#000">
                                     <source src="${this.videoUrl}" type="video/mp4">
                                     ${subtitleUrl ? `<track id="subtitleTrack" kind="subtitles" src="${subtitleUrl}" srclang="es" label="Español" default>` : ''}
                                     Tu navegador no soporta video.
@@ -186,10 +219,10 @@ export default class PlayerView {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 </a>
                                 <button class="overlay-btn" onclick="window.__playerView.navigateClass(-1)" title="Anterior">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                                    <svg class="overlay-nav-icon overlay-nav-icon-prev" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg>
                                 </button>
                                 <button class="overlay-btn" onclick="window.__playerView.navigateClass(1)" title="Siguiente">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zm-10 6l8.5 6V6z" transform="scale(-1,1) translate(-24,0)"/></svg>
+                                    <svg class="overlay-nav-icon overlay-nav-icon-next" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg>
                                 </button>
                             </div>
 
@@ -655,12 +688,86 @@ export default class PlayerView {
 
         const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
         let currentSpeedIdx = 2;
+        let pendingSeekResume = false;
+        let manualSpeedOverride = false;
+        let lastFrameStats = null;
+        let lastAutoResyncMs = 0;
+        let dropSpikeStreak = 0;
+        let severeDropStreak = 0;
+        let lastQualityDownshiftMs = 0;
+        let lastHardResyncMs = 0;
+        let qualitySources = [];
+        let applyQuality = null;
+        let autoDownshiftQuality = null;
 
         // Format time
         const fmt = (s) => {
             const m = Math.floor(s / 60);
             const sec = Math.floor(s % 60);
             return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+        };
+
+        const playWhenReady = () => {
+            if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                video.play().catch(() => { });
+            } else {
+                video.addEventListener('canplay', () => video.play().catch(() => { }), { once: true });
+            }
+        };
+
+        const seekToTime = (targetTime) => {
+            if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+            const clamped = Math.max(0, Math.min(video.duration, targetTime));
+            const wasPlaying = !video.paused;
+            pendingSeekResume = wasPlaying;
+            if (wasPlaying) video.pause();
+            video.currentTime = clamped;
+        };
+
+        const previewSeekFromClientX = (clientX) => {
+            const rect = progressBar.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const target = pct * (video.duration || 0);
+            playedBar.style.width = pct * 100 + '%';
+            thumb.style.left = pct * 100 + '%';
+            if (video.duration) {
+                timeDisplay.textContent = `${fmt(target)} / ${fmt(video.duration)}`;
+            }
+            return target;
+        };
+
+        const getBufferAhead = () => {
+            const t = video.currentTime;
+            for (let i = 0; i < video.buffered.length; i++) {
+                const start = video.buffered.start(i);
+                const end = video.buffered.end(i);
+                if (t >= start && t <= end) return Math.max(0, end - t);
+            }
+            return 0;
+        };
+
+        const hardResync = () => {
+            const now = Date.now();
+            if (now - lastHardResyncMs < 7000) return;
+            lastHardResyncMs = now;
+
+            if (video.paused || video.seeking) return;
+
+            const targetTime = Math.max(0, (video.currentTime || 0) - 0.08);
+            seekToTime(targetTime);
+        };
+
+        this._playWhenReady = playWhenReady;
+        this._seekToTime = seekToTime;
+        this._getBufferAhead = getBufferAhead;
+
+        const urlsMatch = (a, b) => {
+            if (!a || !b) return false;
+            try {
+                return new URL(a, window.location.href).href === new URL(b, window.location.href).href;
+            } catch (_) {
+                return String(a) === String(b);
+            }
         };
 
         // Play / Pause
@@ -693,44 +800,54 @@ export default class PlayerView {
         // Buffered
         video.addEventListener('progress', () => {
             if (video.buffered.length && video.duration) {
-                const end = video.buffered.end(video.buffered.length - 1);
-                bufferedBar.style.width = (end / video.duration) * 100 + '%';
+                bufferedBar.style.background = 'transparent';
+                bufferedBar.innerHTML = '';
+                for (let i = 0; i < video.buffered.length; i++) {
+                    const start = video.buffered.start(i);
+                    const end = video.buffered.end(i);
+                    const left = (start / video.duration) * 100;
+                    const width = ((end - start) / video.duration) * 100;
+                    const chunk = document.createElement('div');
+                    chunk.style.position = 'absolute';
+                    chunk.style.left = left + '%';
+                    chunk.style.width = width + '%';
+                    chunk.style.height = '100%';
+                    chunk.style.background = 'rgba(255, 255, 255, 0.3)';
+                    chunk.style.borderRadius = '2px';
+                    bufferedBar.appendChild(chunk);
+                }
+                bufferedBar.style.width = '100%';
             }
         });
 
-        // Seek on progress click - with audio sync fix
-        const seekToPosition = (e) => {
-            const rect = progressBar.getBoundingClientRect();
-            const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const wasPlaying = !video.paused;
-            if (wasPlaying) video.pause();
-            video.currentTime = pct * video.duration;
-            // Resume after seek completes to prevent audio desync
-            if (wasPlaying) {
-                video.addEventListener('seeked', () => video.play(), { once: true });
-            }
-        };
+        // Seek on progress bar (single commit on mouseup to avoid double-seek races)
         let isSeeking = false;
+        let pendingSeekTarget = null;
+        video.addEventListener('seeked', () => {
+            if (!pendingSeekResume) return;
+            pendingSeekResume = false;
+            playWhenReady();
+        });
         progressBar.addEventListener('mousedown', (e) => {
             isSeeking = true;
-            seekToPosition(e);
+            pendingSeekTarget = previewSeekFromClientX(e.clientX);
         });
-        document.addEventListener('mousemove', (e) => {
+        this._progressMouseMoveHandler = (e) => {
             if (isSeeking) {
-                // During drag, just update visual, don't seek continuously
-                const rect = progressBar.getBoundingClientRect();
-                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                playedBar.style.width = pct * 100 + '%';
-                thumb.style.left = pct * 100 + '%';
-                timeDisplay.textContent = `${fmt(pct * video.duration)} / ${fmt(video.duration)}`;
+                pendingSeekTarget = previewSeekFromClientX(e.clientX);
             }
-        });
-        document.addEventListener('mouseup', (e) => {
+        };
+        this._progressMouseUpHandler = () => {
             if (isSeeking) {
                 isSeeking = false;
-                seekToPosition(e);
+                if (Number.isFinite(pendingSeekTarget)) {
+                    seekToTime(pendingSeekTarget);
+                }
+                pendingSeekTarget = null;
             }
-        });
+        };
+        document.addEventListener('mousemove', this._progressMouseMoveHandler);
+        document.addEventListener('mouseup', this._progressMouseUpHandler);
 
         // Volume
         volumeSlider.addEventListener('input', () => {
@@ -751,6 +868,7 @@ export default class PlayerView {
 
         // Speed
         speedBtn.addEventListener('click', () => {
+            manualSpeedOverride = true;
             currentSpeedIdx = (currentSpeedIdx + 1) % speeds.length;
             video.playbackRate = speeds[currentSpeedIdx];
             speedBtn.textContent = speeds[currentSpeedIdx] + 'x';
@@ -772,7 +890,7 @@ export default class PlayerView {
 
         // Quality menu
         if (qualityWrap && qualityBtn && qualityMenu) {
-            const qualitySources = this._getQualitySources();
+            qualitySources = this._getQualitySources();
             const sourceTag = video.querySelector('source');
 
             const setActiveQualityOption = (mode, label) => {
@@ -785,7 +903,7 @@ export default class PlayerView {
                 });
             };
 
-            const applyQuality = (url, label, mode) => {
+            applyQuality = (url, label, mode) => {
                 if (!url) return;
 
                 const previousTime = video.currentTime || 0;
@@ -800,12 +918,42 @@ export default class PlayerView {
                     if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < video.duration) {
                         video.currentTime = previousTime;
                     }
-                    if (!wasPaused) video.play().catch(() => { });
+                    if (!wasPaused) {
+                        if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                            video.play().catch(() => { });
+                        } else {
+                            video.addEventListener('canplay', () => video.play().catch(() => { }), { once: true });
+                        }
+                    }
                 }, { once: true });
 
                 qualityBtn.textContent = mode === 'auto' ? `Auto (${label})` : label;
                 setActiveQualityOption(mode, label);
                 qualityWrap.classList.remove('open');
+            };
+
+            const getCurrentQualityIndex = () => {
+                const currentSource = sourceTag?.src || video.currentSrc || video.src;
+                const byUrlIdx = qualitySources.findIndex((item) => urlsMatch(item.url, currentSource));
+                if (byUrlIdx !== -1) return byUrlIdx;
+
+                const activeLabel = (qualityBtn.textContent || '').replace(/^Auto\s*\(|\)$/g, '').trim();
+                const byLabelIdx = qualitySources.findIndex((item) => item.label === activeLabel);
+                return byLabelIdx;
+            };
+
+            autoDownshiftQuality = () => {
+                if (!qualitySources.length || !applyQuality) return false;
+                if (!String(qualityBtn.textContent || '').trim().startsWith('Auto')) return false;
+
+                const currentIdx = getCurrentQualityIndex();
+                if (currentIdx < 0 || currentIdx >= qualitySources.length - 1) return false;
+
+                const lowerQuality = qualitySources[currentIdx + 1];
+                if (!lowerQuality?.url) return false;
+
+                applyQuality(lowerQuality.url, lowerQuality.label || 'Original', 'auto');
+                return true;
             };
 
             qualityBtn.addEventListener('click', (event) => {
@@ -834,10 +982,99 @@ export default class PlayerView {
                 applyQuality(selectedUrl, selectedLabel, 'manual');
             });
 
+            const recommended = this._recommendedQualityLabel || this._getRecommendedQualityLabel(qualitySources);
+            const fallback = qualitySources[qualitySources.length - 1];
+            const selected = qualitySources.find((item) => item.label === recommended) || fallback;
+            if (selected) {
+                const selectedLabel = selected.label || recommended;
+                qualityBtn.textContent = `Auto (${selectedLabel})`;
+                setActiveQualityOption('auto', selectedLabel);
+                const currentSource = sourceTag?.src || video.currentSrc || video.src;
+                if (!urlsMatch(currentSource, selected.url)) {
+                    applyQuality(selected.url, selectedLabel, 'auto');
+                }
+            }
+
             this._qualityOutsideHandler = (event) => {
                 if (!qualityWrap.contains(event.target)) qualityWrap.classList.remove('open');
             };
             document.addEventListener('click', this._qualityOutsideHandler);
+
+        }
+
+        this._syncGuardTimer = window.setInterval(() => {
+            if (manualSpeedOverride || video.paused || video.seeking || Math.abs(video.playbackRate - 1) > 0.001) {
+                dropSpikeStreak = 0;
+                severeDropStreak = 0;
+                return;
+            }
+            if (typeof video.getVideoPlaybackQuality !== 'function') return;
+
+            const qualityStats = video.getVideoPlaybackQuality();
+            const dropped = qualityStats?.droppedVideoFrames || 0;
+            const total = qualityStats?.totalVideoFrames || 0;
+
+            if (!lastFrameStats) {
+                lastFrameStats = { dropped, total };
+                return;
+            }
+
+            const droppedDelta = dropped - lastFrameStats.dropped;
+            const totalDelta = total - lastFrameStats.total;
+            lastFrameStats = { dropped, total };
+
+            const sampledFrames = droppedDelta + totalDelta;
+            if (sampledFrames < 45) return;
+
+            const dropRatio = droppedDelta / sampledFrames;
+            const bufferAhead = getBufferAhead();
+
+            const isModerateDrop = dropRatio >= 0.12 && sampledFrames >= 60;
+            const isSevereDrop = dropRatio >= 0.2 && sampledFrames >= 60;
+
+            dropSpikeStreak = isModerateDrop ? dropSpikeStreak + 1 : 0;
+            severeDropStreak = isSevereDrop ? severeDropStreak + 1 : 0;
+
+            if (severeDropStreak >= 2 && bufferAhead >= 0.35) {
+                const now = Date.now();
+                const canDownshift = now - lastQualityDownshiftMs >= 9000;
+
+                if (canDownshift && autoDownshiftQuality && autoDownshiftQuality()) {
+                    lastQualityDownshiftMs = now;
+                    dropSpikeStreak = 0;
+                    severeDropStreak = 0;
+                    return;
+                }
+
+                hardResync();
+                severeDropStreak = 0;
+                return;
+            }
+
+            if (dropSpikeStreak < 3 || bufferAhead < 0.6) return;
+
+            const now = Date.now();
+            if (now - lastAutoResyncMs < 8000) return;
+            lastAutoResyncMs = now;
+            dropSpikeStreak = 0;
+            seekToTime(Math.max(0, video.currentTime - 0.05));
+        }, 3000);
+
+        if (typeof video.requestVideoFrameCallback === 'function') {
+            const frameSyncLoop = (_timestamp, metadata) => {
+                if (this._isDestroyed) return;
+
+                if (!video.paused && !video.seeking && !manualSpeedOverride && Number.isFinite(metadata?.mediaTime)) {
+                    const driftSeconds = Math.abs((video.currentTime || 0) - metadata.mediaTime);
+                    if (driftSeconds > 0.2) {
+                        hardResync();
+                    }
+                }
+
+                this._videoFrameCallbackId = video.requestVideoFrameCallback(frameSyncLoop);
+            };
+
+            this._videoFrameCallbackId = video.requestVideoFrameCallback(frameSyncLoop);
         }
 
         // Fullscreen (proper API on the wrapper, not video element)
@@ -890,17 +1127,42 @@ export default class PlayerView {
     }
 
     mounted() {
+        this._isDestroyed = false;
         const video = document.getElementById('mainVideo');
+        this._videoEl = video || null;
         if (video) {
-            // Fix audio/video sync: wait for metadata then play
+            this._setupCustomControls();
+
+            // Start only when we have enough forward buffer to reduce A/V drift on heavy classes.
             const startPlayback = () => {
+                if (this._isDestroyed) return;
+                if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+                    if (!this._startPlaybackCanPlayHandler) {
+                        this._startPlaybackCanPlayHandler = () => {
+                            this._startPlaybackCanPlayHandler = null;
+                            startPlayback();
+                        };
+                        video.addEventListener('canplay', this._startPlaybackCanPlayHandler, { once: true });
+                    }
+                    return;
+                }
+
+                const bufferAhead = this._getBufferAhead ? this._getBufferAhead() : 0;
+                if (bufferAhead < 0.25) {
+                    if (this._startPlaybackTimeout) {
+                        window.clearTimeout(this._startPlaybackTimeout);
+                    }
+                    this._startPlaybackTimeout = window.setTimeout(() => {
+                        this._startPlaybackTimeout = null;
+                        startPlayback();
+                    }, 120);
+                    return;
+                }
+
+                if (this._isDestroyed) return;
                 video.play().catch(() => { });
             };
-            if (video.readyState >= 1) {
-                startPlayback();
-            } else {
-                video.addEventListener('loadedmetadata', startPlayback, { once: true });
-            }
+            startPlayback();
 
             video.addEventListener('play', () => {
                 state.markClassInProgress(this.classKey, video.currentTime);
@@ -911,8 +1173,6 @@ export default class PlayerView {
                 if (sidebar) sidebar.innerHTML = this.renderSidebar();
                 setTimeout(() => this.navigateClass(1), 1500);
             });
-
-            this._setupCustomControls();
         }
 
         this._isTouchMode = this._isTouchDevice();
@@ -965,24 +1225,18 @@ export default class PlayerView {
             // Left/Right arrows to seek 5s (with sync fix)
             if (e.key === 'ArrowLeft' && !e.altKey && video) {
                 e.preventDefault();
-                const wasPlaying = !video.paused;
-                if (wasPlaying) video.pause();
-                video.currentTime = Math.max(0, video.currentTime - 5);
-                if (wasPlaying) video.addEventListener('seeked', () => video.play(), { once: true });
+                if (this._seekToTime) this._seekToTime(video.currentTime - 5);
             }
             if (e.key === 'ArrowRight' && !e.altKey && video) {
                 e.preventDefault();
-                const wasPlaying = !video.paused;
-                if (wasPlaying) video.pause();
-                video.currentTime = Math.min(video.duration, video.currentTime + 5);
-                if (wasPlaying) video.addEventListener('seeked', () => video.play(), { once: true });
+                if (this._seekToTime) this._seekToTime(video.currentTime + 5);
             }
         };
         document.addEventListener('keydown', this._keyHandler);
     }
 
     _stopVideoPlayback() {
-        const video = document.getElementById('mainVideo');
+        const video = this._videoEl || document.getElementById('mainVideo');
         if (!video) return;
 
         try {
@@ -1010,14 +1264,36 @@ export default class PlayerView {
     }
 
     destroy() {
+        this._isDestroyed = true;
+
+        if (this._startPlaybackTimeout) {
+            window.clearTimeout(this._startPlaybackTimeout);
+            this._startPlaybackTimeout = null;
+        }
+
+        if (this._videoEl && this._startPlaybackCanPlayHandler) {
+            this._videoEl.removeEventListener('canplay', this._startPlaybackCanPlayHandler);
+            this._startPlaybackCanPlayHandler = null;
+        }
+
+        if (this._videoEl && this._videoFrameCallbackId !== null && typeof this._videoEl.cancelVideoFrameCallback === 'function') {
+            this._videoEl.cancelVideoFrameCallback(this._videoFrameCallbackId);
+            this._videoFrameCallbackId = null;
+        }
+
         this._stopVideoPlayback();
         if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+        if (this._progressMouseMoveHandler) document.removeEventListener('mousemove', this._progressMouseMoveHandler);
+        if (this._progressMouseUpHandler) document.removeEventListener('mouseup', this._progressMouseUpHandler);
+        if (this._syncGuardTimer) window.clearInterval(this._syncGuardTimer);
         if (this._viewportModeHandler) window.removeEventListener('resize', this._viewportModeHandler);
         if (this._qualityOutsideHandler) document.removeEventListener('click', this._qualityOutsideHandler);
         if (this._fsChangeHandler) {
             document.removeEventListener('fullscreenchange', this._fsChangeHandler);
             document.removeEventListener('webkitfullscreenchange', this._fsChangeHandler);
         }
+        this._videoFrameCallbackId = null;
+        this._videoEl = null;
         window.__playerView = null;
     }
 }

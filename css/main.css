@@ -1,0 +1,14 @@
+/* ===== Main CSS Entry File ===== */
+@import 'base/_reset.css';
+@import 'base/_animations.css';
+@import 'layouts/_grid.css';
+@import 'layouts/_navbar.css';
+@import 'components/_buttons.css';
+@import 'components/_cards.css';
+@import 'components/_loading.css';
+@import 'components/_states.css';
+@import 'views/_course-view.css';
+@import 'views/_home.css';
+@import 'views/_player-view.css';
+@import 'views/_responsive.css';
+@import 'views/_route-view.css';

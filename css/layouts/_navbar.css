@@ -1,0 +1,205 @@
+/* ===== Navigation ===== */
+.navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 56px;
+    background: rgba(10, 10, 15, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    flex-shrink: 0;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 1.15rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.logo-icon {
+    font-size: 1.4rem;
+}
+
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.87rem;
+    transition: var(--transition);
+    padding: 6px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.nav-link:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-link.active {
+    color: var(--accent-primary);
+    background: rgba(0, 214, 143, 0.15);
+    font-weight: 600;
+}
+
+.nav-link.active:hover {
+    background: rgba(0, 214, 143, 0.22);
+}
+
+.user-profile {
+    flex-shrink: 0;
+}
+
+.avatar-circle {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #000;
+    cursor: pointer;
+}
+
+
+/* ===== Mobile Navbar Styles ===== */
+.hamburger-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 24px;
+    position: relative;
+    z-index: 1002;
+    /* Above nav-links overlay */
+}
+
+.hamburger-btn span {
+    display: block;
+    width: 100%;
+    height: 3px;
+    background-color: var(--text-primary);
+    border-radius: 3px;
+    position: absolute;
+    left: 0;
+    transition: all 0.3s ease-in-out;
+}
+
+.hamburger-btn span:nth-child(1) {
+    top: 0;
+}
+
+.hamburger-btn span:nth-child(2) {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.hamburger-btn span:nth-child(3) {
+    bottom: 0;
+}
+
+/* Hamburger Animation */
+.hamburger-btn.active span:nth-child(1) {
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+}
+
+.hamburger-btn.active span:nth-child(2) {
+    opacity: 0;
+}
+
+.hamburger-btn.active span:nth-child(3) {
+    bottom: 50%;
+    transform: translateY(50%) rotate(-45deg);
+}
+
+/* Prevent body scroll when menu open */
+body.no-scroll {
+    overflow: hidden;
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        justify-content: flex-start;
+        padding: 0 10px 0 14px;
+    }
+
+    .user-profile {
+        display: none;
+    }
+
+    .hamburger-btn {
+        display: block;
+        margin-left: auto;
+        margin-right: 0;
+        position: relative;
+        right: 0;
+    }
+
+    .nav-links {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background: rgba(10, 10, 15, 0.98);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 2rem;
+        padding: 2rem;
+        z-index: 1001;
+        /* Below hamburger, above everything else */
+        transform: translateY(-100%);
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .nav-links.active {
+        transform: translateY(0);
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .nav-link {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        padding: 1rem 2rem;
+        width: 100%;
+        text-align: center;
+        border-radius: var(--radius-lg);
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}

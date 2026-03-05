@@ -7,13 +7,21 @@ export default class RouteView {
         this.routeIdx = parseInt(params.routeIdx);
         this.routeData = state.getRoute(this.catIdx, this.routeIdx);
         this.category = state.getCategory(this.catIdx);
+        this.detailErrorCode = null;
     }
 
     async render() {
+        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
         if (!this.routeData) return '<div class="error-state"><h2>⚠️ Ruta no encontrada</h2><a href="#home">← Volver al inicio</a></div>';
 
         // If this "route" is actually a single course, render as course view
         if (this.routeData.isCourse) {
+            try {
+                this.routeData = await state.ensureCourseDetail(this.catIdx, this.routeIdx, 0) || this.routeData;
+            } catch (error) {
+                this.detailErrorCode = error?.code || 'course_detail_unavailable';
+                this.routeData = state.getRoute(this.catIdx, this.routeIdx) || this.routeData;
+            }
             return this.renderAsCourse();
         }
 
@@ -64,6 +72,11 @@ export default class RouteView {
 
         return `
             <div class="view-course fade-in">
+                ${this.detailErrorCode ? `
+                    <div style="margin-bottom: 1rem; padding: 10px 12px; border: 1px solid rgba(255,196,0,.22); background: rgba(255,196,0,.07); color: #ffd36a; border-radius: 10px; font-size: .9rem;">
+                        ⚠️ No se pudo cargar el detalle completo del curso (<code style="background: rgba(0,0,0,.25); padding: 2px 6px; border-radius: 6px;">${this.detailErrorCode}</code>).
+                    </div>
+                ` : ''}
                 <header class="course-hero">
                     <nav class="breadcrumb">
                         <a href="#home" class="breadcrumb-link">🏠 Inicio</a>

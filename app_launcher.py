@@ -12,7 +12,8 @@ def _base_dir():
 
 def _open_browser(port):
     try:
-        webbrowser.open(f'http://localhost:{port}')
+        host = os.environ.get('HOST', '127.0.0.1')
+        webbrowser.open(f'http://{host}:{port}')
     except Exception:
         return
 

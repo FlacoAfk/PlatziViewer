@@ -82,6 +82,7 @@ Thumbs.db
 
 # Credentials and secrets (KEEP LOCAL ONLY)
 service_account.json
+secrets/
 *.key
 *.pem
 *.p12
@@ -124,3 +125,4 @@ venv.bak/
 *.bak
 *.backup
 *.old
+runtime-data/

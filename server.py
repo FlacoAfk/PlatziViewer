@@ -8,9 +8,10 @@ import os
 import json
 import re
 import errno
+import gzip
+import unicodedata
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote, urlparse
-import mimetypes
 import threading
 import time
 import subprocess
@@ -18,21 +19,41 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIEWER_PATH = os.environ.get('PLATZI_VIEWER_PATH', BASE_DIR)
 DATA_PATH = os.environ.get('PLATZI_DATA_PATH', VIEWER_PATH)
 PORT = int(os.environ.get('PORT', '8080'))
+BIND_HOST = os.environ.get('HOST', '127.0.0.1')
+DISPLAY_HOST = os.environ.get('PUBLIC_HOST', BIND_HOST)
 PROGRESS_FILE = os.path.join(DATA_PATH, "progress.json")
 VIEWER_CACHE_FILE = os.path.join(VIEWER_PATH, "courses_cache.json")
 DATA_CACHE_FILE = os.path.join(DATA_PATH, "courses_cache.json")
 MAX_PROGRESS_BYTES = int(os.environ.get('MAX_PROGRESS_BYTES', '2097152'))  # 2MB
 LOOPBACK_HOSTS = {'localhost', '127.0.0.1', '::1'}
+EMPTY_STATS = {
+    'totalCategories': 0,
+    'totalRoutes': 0,
+    'totalCourses': 0,
+    'totalClasses': 0,
+}
 
 # Caché global
 courses_cache = None
+bootstrap_cache = None
+cache_meta = {}
 cache_lock = threading.Lock()
 cache_reload_lock = threading.Lock()
 cache_mtime = None
 cache_file_path = None
+cache_source = 'none'
+invalid_cache_files = {}
+
+full_cache_json_bytes = b''
+full_cache_json_gzip_bytes = b''
+bootstrap_cache_json_bytes = b''
+bootstrap_cache_json_gzip_bytes = b''
+cache_meta_json_bytes = b''
+cache_meta_json_gzip_bytes = b''
 
 # Google Drive service (lazy loaded)
 _drive_service = None
+_drive_service_error = None
 DRIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{10,}$')
 
 
@@ -114,68 +135,483 @@ def analyze_drive_references(data):
 
 
 def get_drive_service():
-    global _drive_service
+    global _drive_service, _drive_service_error
     if _drive_service is None:
         try:
             from drive_service import drive_service
             _drive_service = drive_service
+            _drive_service_error = None
         except Exception as e:
-            print(f"⚠️ Drive service not available: {e}")
+            _drive_service_error = str(e)
+            print(f"[WARN] Drive service not available: {_drive_service_error}")
     return _drive_service
 
 
+def get_drive_service_error():
+    return _drive_service_error
+
+
+def _empty_courses_payload():
+    return {'categories': [], 'stats': dict(EMPTY_STATS)}
+
+
+def _normalize_stats(stats):
+    raw = stats if isinstance(stats, dict) else {}
+    return {
+        'totalCategories': int(raw.get('totalCategories', 0) or 0),
+        'totalRoutes': int(raw.get('totalRoutes', 0) or 0),
+        'totalCourses': int(raw.get('totalCourses', 0) or 0),
+        'totalClasses': int(raw.get('totalClasses', 0) or 0),
+    }
+
+
+def _payload_to_bytes(payload):
+    return json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+
+
+def _gzip_payload(raw_bytes):
+    return gzip.compress(raw_bytes, compresslevel=5) if raw_bytes else b''
+
+
+def _is_cache_data_valid(data):
+    if not isinstance(data, dict):
+        return False
+    categories = data.get('categories')
+    if not isinstance(categories, list):
+        return False
+    stats = data.get('stats')
+    if stats is not None and not isinstance(stats, dict):
+        return False
+    return True
+
+
+def _get_cache_preference_order():
+    prefer_data = str(os.environ.get('PLATZI_PREFER_DATA_CACHE', '1')).strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
+    if prefer_data:
+        return [DATA_CACHE_FILE, VIEWER_CACHE_FILE]
+    return [VIEWER_CACHE_FILE, DATA_CACHE_FILE]
+
+
+def _cache_source_from_path(path):
+    if not path:
+        return 'none'
+    normalized = os.path.abspath(path)
+    if normalized == os.path.abspath(DATA_CACHE_FILE):
+        return 'data'
+    if normalized == os.path.abspath(VIEWER_CACHE_FILE):
+        return 'viewer'
+    return 'external'
+
+
+def _mark_cache_invalid(path, mtime):
+    if path and mtime is not None:
+        invalid_cache_files[path] = float(mtime)
+
+
+def _clear_invalid_cache_mark(path):
+    if path in invalid_cache_files:
+        del invalid_cache_files[path]
+
+
+def _is_known_invalid_cache(path, mtime):
+    invalid_mtime = invalid_cache_files.get(path)
+    if invalid_mtime is None or mtime is None:
+        return False
+    return float(mtime) <= invalid_mtime
+
+
+def _load_cache_file(path):
+    if not os.path.exists(path):
+        return None, None, 'missing_file'
+
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError as e:
+        return None, None, str(e)
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not _is_cache_data_valid(data):
+            raise ValueError('courses_cache.json inválido: schema básico no cumple')
+        return data, mtime, None
+    except Exception as e:
+        return None, mtime, str(e)
+
+
+def _slugify(value):
+    text = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode('ascii')
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+    return text
+
+
+def _extract_url_slug(url_value):
+    try:
+        parsed = urlparse(str(url_value or '').strip())
+        pieces = [segment for segment in parsed.path.split('/') if segment]
+        return pieces[-1] if pieces else ''
+    except Exception:
+        return ''
+
+
+def _module_class_count(module):
+    classes = (module or {}).get('classes', [])
+    if isinstance(classes, list):
+        return len(classes)
+    if isinstance(classes, int):
+        return max(classes, 0)
+    return 0
+
+
+def _summarize_modules(modules):
+    summaries = []
+    total_classes = 0
+    for idx, module in enumerate(modules or []):
+        class_count = _module_class_count(module)
+        total_classes += class_count
+        summaries.append({
+            'name': (module or {}).get('name') or f'Módulo {idx + 1}',
+            'classCount': class_count,
+            # Mantener compatibilidad con frontend actual: classes numérico.
+            'classes': class_count,
+        })
+    return summaries, total_classes
+
+
+def _course_public_id(course):
+    slug = _extract_url_slug((course or {}).get('url'))
+    if slug:
+        return slug
+
+    course_id = str((course or {}).get('id') or '').strip()
+    if course_id:
+        return course_id
+
+    return _slugify((course or {}).get('name') or '')
+
+
+def _build_bootstrap_course(course):
+    raw = course or {}
+    modules_summary, computed_classes = _summarize_modules(raw.get('modules', []))
+
+    module_count = raw.get('moduleCount')
+    if not isinstance(module_count, int):
+        module_count = len(modules_summary)
+
+    class_count = raw.get('classCount')
+    if not isinstance(class_count, int):
+        class_count = computed_classes
+
+    return {
+        'name': raw.get('name', ''),
+        'folderName': raw.get('folderName', ''),
+        'url': raw.get('url', ''),
+        'id': raw.get('id', ''),
+        'publicId': _course_public_id(raw),
+        'moduleCount': module_count,
+        'classCount': class_count,
+        'foundInDrive': raw.get('foundInDrive', True),
+        'matchType': raw.get('matchType'),
+        'matchedFolder': raw.get('matchedFolder'),
+        'hasPresentation': raw.get('hasPresentation', False),
+        'presentationId': raw.get('presentationId', ''),
+        'modules': modules_summary,
+    }
+
+
+def _build_bootstrap_route(route):
+    raw = route or {}
+
+    base = {
+        'id': raw.get('id', ''),
+        'name': raw.get('name', ''),
+        'url': raw.get('url', ''),
+        'isCourse': bool(raw.get('isCourse')),
+    }
+
+    if raw.get('isCourse'):
+        summary = _build_bootstrap_course(raw)
+        base.update(summary)
+        base['isCourse'] = True
+        return base
+
+    courses = [_build_bootstrap_course(c) for c in raw.get('courses', [])]
+    base['courses'] = courses
+    base['courseCount'] = raw.get('courseCount', len(courses))
+    return base
+
+
+def _build_bootstrap_payload(data):
+    raw = data if isinstance(data, dict) else _empty_courses_payload()
+    categories = []
+
+    for category in raw.get('categories', []):
+        routes = [_build_bootstrap_route(route) for route in (category or {}).get('routes', [])]
+        cat_payload = {
+            'id': (category or {}).get('id', ''),
+            'name': (category or {}).get('name', ''),
+            'icon': (category or {}).get('icon', ''),
+            'description': (category or {}).get('description', ''),
+            'type': (category or {}).get('type', ''),
+            'routes': routes,
+        }
+        if 'courseCount' in (category or {}):
+            cat_payload['courseCount'] = (category or {}).get('courseCount')
+        categories.append(cat_payload)
+
+    return {
+        'categories': categories,
+        'stats': _normalize_stats(raw.get('stats')),
+    }
+
+
+def _format_epoch_to_iso(epoch_value):
+    if epoch_value is None:
+        return None
+    try:
+        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(epoch_value)))
+    except Exception:
+        return None
+
+
+def _build_cache_meta_payload(selected_cache_file, selected_mtime, data, full_bytes_len, bootstrap_bytes_len):
+    return {
+        'cache_file_path': selected_cache_file,
+        'cache_file_name': os.path.basename(selected_cache_file) if selected_cache_file else None,
+        'source': _cache_source_from_path(selected_cache_file),
+        'mtime': _format_epoch_to_iso(selected_mtime),
+        'mtimeEpoch': selected_mtime,
+        'stats': _normalize_stats((data or {}).get('stats')),
+        'payloadBytes': {
+            'full': int(full_bytes_len or 0),
+            'bootstrap': int(bootstrap_bytes_len or 0),
+        },
+    }
+
+
+def _ref_matches(ref_value, idx, candidates):
+    normalized = str(ref_value or '').strip().lower()
+    if not normalized:
+        return False
+
+    if normalized == str(idx).lower():
+        return True
+
+    for candidate in candidates:
+        c = str(candidate or '').strip().lower()
+        if c and normalized == c:
+            return True
+    return False
+
+
+def _resolve_course_detail_refs(data, cat_ref, route_ref, course_ref):
+    categories = (data or {}).get('categories', [])
+
+    for cat_idx, category in enumerate(categories):
+        cat_candidates = [
+            category.get('id'),
+            category.get('name'),
+            _slugify(category.get('name')),
+        ]
+        if not _ref_matches(cat_ref, cat_idx, cat_candidates):
+            continue
+
+        for route_idx, route in enumerate(category.get('routes', [])):
+            route_candidates = [
+                route.get('id'),
+                route.get('name'),
+                _slugify(route.get('name')),
+                _extract_url_slug(route.get('url')),
+            ]
+            if not _ref_matches(route_ref, route_idx, route_candidates):
+                continue
+
+            if route.get('isCourse'):
+                course_candidates = [
+                    route.get('id'),
+                    route.get('name'),
+                    _slugify(route.get('name')),
+                    _extract_url_slug(route.get('url')),
+                    _course_public_id(route),
+                ]
+                # Para rutas de curso único permitimos "0" además de IDs/slug.
+                if _ref_matches(course_ref, 0, course_candidates):
+                    return {
+                        'catIdx': cat_idx,
+                        'routeIdx': route_idx,
+                        'courseIdx': 0,
+                        'category': category,
+                        'route': route,
+                        'course': route,
+                    }
+                continue
+
+            for course_idx, course in enumerate(route.get('courses', [])):
+                course_candidates = [
+                    course.get('id'),
+                    course.get('name'),
+                    _slugify(course.get('name')),
+                    _extract_url_slug(course.get('url')),
+                    _course_public_id(course),
+                ]
+                if _ref_matches(course_ref, course_idx, course_candidates):
+                    return {
+                        'catIdx': cat_idx,
+                        'routeIdx': route_idx,
+                        'courseIdx': course_idx,
+                        'category': category,
+                        'route': route,
+                        'course': course,
+                    }
+
+    return None
+
+
+def _build_course_detail_payload(match):
+    category = match['category']
+    route = match['route']
+    course = match['course']
+
+    return {
+        'catId': category.get('id') or str(match['catIdx']),
+        'routeId': route.get('id') or str(match['routeIdx']),
+        'courseId': _course_public_id(course) or str(match['courseIdx']),
+        'indices': {
+            'catIdx': match['catIdx'],
+            'routeIdx': match['routeIdx'],
+            'courseIdx': match['courseIdx'],
+        },
+        'course': course,
+        'isCourseRoute': bool(route.get('isCourse')),
+    }
+
+
 def resolve_cache_file_path():
-    if os.path.exists(DATA_CACHE_FILE):
-        return DATA_CACHE_FILE
-    return VIEWER_CACHE_FILE
+    order = _get_cache_preference_order()
+    fallback = order[0] if order else VIEWER_CACHE_FILE
+
+    for candidate in order:
+        if not os.path.exists(candidate):
+            continue
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            continue
+        if _is_known_invalid_cache(candidate, mtime):
+            continue
+        return candidate
+
+    return fallback
 
 
 def init_cache():
     """Inicializa el caché cargando courses_cache.json."""
-    global courses_cache, cache_mtime, cache_file_path
+    global courses_cache, bootstrap_cache, cache_meta
+    global cache_mtime, cache_file_path, cache_source
+    global full_cache_json_bytes, full_cache_json_gzip_bytes
+    global bootstrap_cache_json_bytes, bootstrap_cache_json_gzip_bytes
+    global cache_meta_json_bytes, cache_meta_json_gzip_bytes
 
-    selected_cache_file = resolve_cache_file_path()
+    selected_cache_file = None
+    selected_mtime = None
+    selected_data = None
+    load_errors = []
 
-    if os.path.exists(selected_cache_file):
-        print(f"📖 Cargando datos desde {os.path.basename(selected_cache_file)}...")
-        try:
-            current_mtime = os.path.getmtime(selected_cache_file)
-            with open(selected_cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+    for candidate in _get_cache_preference_order():
+        if not os.path.exists(candidate):
+            continue
 
-            if not isinstance(data, dict) or 'categories' not in data:
-                raise ValueError('courses_cache.json inválido: falta clave categories')
+        data, mtime, error = _load_cache_file(candidate)
+        if error:
+            load_errors.append((candidate, error))
+            _mark_cache_invalid(candidate, mtime)
+            print(f"[WARN] Cache inválido en {candidate}: {error}")
+            continue
 
-            with cache_lock:
-                courses_cache = data
-                cache_mtime = current_mtime
-                cache_file_path = selected_cache_file
+        selected_cache_file = candidate
+        selected_mtime = mtime
+        selected_data = data
+        _clear_invalid_cache_mark(candidate)
+        break
 
-            stats = data.get('stats', {})
-            print(f"\n✅ Datos cargados: {stats.get('totalCategories', 0)} categorías, "
-                  f"{stats.get('totalRoutes', 0)} rutas, {stats.get('totalCourses', 0)} cursos, "
-                  f"{stats.get('totalClasses', 0)} clases")
-        except Exception as e:
-            print(f"❌ Error cargando courses_cache.json: {e}")
-            with cache_lock:
-                has_previous_cache = courses_cache is not None
-
-            if has_previous_cache:
-                print("⚠️ Conservando caché anterior en memoria por error temporal de lectura")
-            else:
-                with cache_lock:
-                    courses_cache = {'categories': [], 'stats': {'totalCategories': 0, 'totalRoutes': 0, 'totalCourses': 0, 'totalClasses': 0}}
-                    cache_mtime = None
-                    cache_file_path = selected_cache_file
-    else:
-        print("❌ courses_cache.json no encontrado.")
-        print("   Ejecuta: python rebuild_cache_drive.py")
+    if selected_data is None:
         with cache_lock:
-            courses_cache = {'categories': [], 'stats': {'totalCategories': 0, 'totalRoutes': 0, 'totalCourses': 0, 'totalClasses': 0}}
-            cache_mtime = None
+            has_previous_cache = courses_cache is not None
+
+        if load_errors:
+            print("[ERROR] No se encontró un courses_cache.json válido en las rutas preferidas.")
+        else:
+            print("[ERROR] courses_cache.json no encontrado.")
+            print("   Ejecuta: python rebuild_cache_drive.py")
+
+        if has_previous_cache:
+            print("[WARN] Conservando caché anterior en memoria por error temporal de lectura")
+        else:
+            empty_data = _empty_courses_payload()
+            empty_bootstrap = _build_bootstrap_payload(empty_data)
+            full_bytes = _payload_to_bytes(empty_data)
+            bootstrap_bytes = _payload_to_bytes(empty_bootstrap)
+            meta_payload = _build_cache_meta_payload(
+                selected_cache_file or resolve_cache_file_path(),
+                None,
+                empty_data,
+                len(full_bytes),
+                len(bootstrap_bytes),
+            )
+            meta_bytes = _payload_to_bytes(meta_payload)
+
+            with cache_lock:
+                courses_cache = empty_data
+                bootstrap_cache = empty_bootstrap
+                cache_meta = meta_payload
+                cache_mtime = None
+                cache_file_path = selected_cache_file or resolve_cache_file_path()
+                cache_source = _cache_source_from_path(cache_file_path)
+
+                full_cache_json_bytes = full_bytes
+                full_cache_json_gzip_bytes = _gzip_payload(full_bytes)
+                bootstrap_cache_json_bytes = bootstrap_bytes
+                bootstrap_cache_json_gzip_bytes = _gzip_payload(bootstrap_bytes)
+                cache_meta_json_bytes = meta_bytes
+                cache_meta_json_gzip_bytes = _gzip_payload(meta_bytes)
+    else:
+        bootstrap_data = _build_bootstrap_payload(selected_data)
+        full_bytes = _payload_to_bytes(selected_data)
+        bootstrap_bytes = _payload_to_bytes(bootstrap_data)
+        meta_payload = _build_cache_meta_payload(
+            selected_cache_file,
+            selected_mtime,
+            selected_data,
+            len(full_bytes),
+            len(bootstrap_bytes),
+        )
+        meta_bytes = _payload_to_bytes(meta_payload)
+
+        with cache_lock:
+            courses_cache = selected_data
+            bootstrap_cache = bootstrap_data
+            cache_meta = meta_payload
+            cache_mtime = selected_mtime
             cache_file_path = selected_cache_file
-    
-    print(f"🌐 Servidor listo en http://localhost:{PORT}\n")
+            cache_source = _cache_source_from_path(selected_cache_file)
+
+            full_cache_json_bytes = full_bytes
+            full_cache_json_gzip_bytes = _gzip_payload(full_bytes)
+            bootstrap_cache_json_bytes = bootstrap_bytes
+            bootstrap_cache_json_gzip_bytes = _gzip_payload(bootstrap_bytes)
+            cache_meta_json_bytes = meta_bytes
+            cache_meta_json_gzip_bytes = _gzip_payload(meta_bytes)
+
+        stats = _normalize_stats(selected_data.get('stats'))
+        print(f"[INFO] Cache seleccionado ({cache_source}): {selected_cache_file}")
+        print(f"\n[OK] Datos cargados: {stats.get('totalCategories', 0)} categorías, "
+              f"{stats.get('totalRoutes', 0)} rutas, {stats.get('totalCourses', 0)} cursos, "
+              f"{stats.get('totalClasses', 0)} clases")
+
+    print(f"[INFO] Servidor listo en http://{DISPLAY_HOST}:{PORT}\n")
 
 
 def refresh_cache_if_changed():
@@ -198,7 +634,7 @@ def refresh_cache_if_changed():
         with cache_reload_lock:
             with cache_lock:
                 if cache_file_path != current_cache_file:
-                    print("🔄 Cambio de origen de caché detectado, recargando...")
+                    print("[INFO] Cambio de origen de caché detectado, recargando...")
                     init_cache()
         return
 
@@ -212,12 +648,22 @@ def refresh_cache_if_changed():
         if latest_mtime is not None and current_mtime <= latest_mtime:
             return
 
-        print("🔄 Detectado cambio en courses_cache.json, recargando caché...")
+        print("[INFO] Detectado cambio en courses_cache.json, recargando caché...")
         init_cache()
 
 
 class PlatziHandler(SimpleHTTPRequestHandler):
     """Manejador HTTP personalizado."""
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        '.js': 'application/javascript; charset=utf-8',
+        '.mjs': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.map': 'application/json; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.wasm': 'application/wasm',
+    }
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=VIEWER_PATH, **kwargs)
@@ -243,14 +689,28 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
 
-    def _send_json(self, status_code, payload):
+    def _accepts_gzip(self):
+        return 'gzip' in str(self.headers.get('Accept-Encoding', '')).lower()
+
+    def _send_json_bytes(self, status_code, raw_bytes, gzip_bytes=None):
+        use_gzip = bool(gzip_bytes) and self._accepts_gzip()
+        payload = gzip_bytes if use_gzip else raw_bytes
+
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Cache-Control', 'no-store, max-age=0')
         self.send_header('Pragma', 'no-cache')
+        if use_gzip:
+            self.send_header('Content-Encoding', 'gzip')
+        self.send_header('Content-Length', str(len(payload)))
         self._set_cors_headers()
         self.end_headers()
-        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        self.wfile.write(payload)
+
+    def _send_json(self, status_code, payload):
+        raw_bytes = _payload_to_bytes(payload)
+        gzip_bytes = _gzip_payload(raw_bytes) if len(raw_bytes) >= 1024 else None
+        self._send_json_bytes(status_code, raw_bytes, gzip_bytes)
 
     def _is_local_client(self):
         host = self.client_address[0]
@@ -278,17 +738,84 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 raise
     
     def do_GET(self):
+        if self.path == '/api/health':
+            ds = get_drive_service()
+            payload = {
+                'status': 'ok',
+                'drive': {
+                    'available': bool(ds),
+                    'error': None if ds else get_drive_service_error(),
+                }
+            }
+            self._send_json(200, payload)
+            return
+
         # API endpoint
         if self.path == '/api/courses':
             refresh_cache_if_changed()
 
             with cache_lock:
-                if courses_cache:
-                    data = courses_cache
-                else:
-                    data = {'categories': [], 'stats': {'totalCategories': 0, 'totalRoutes': 0, 'totalCourses': 0, 'totalClasses': 0}}
+                raw_bytes = full_cache_json_bytes or _payload_to_bytes(_empty_courses_payload())
+                gzip_bytes = full_cache_json_gzip_bytes or None
 
-            self._send_json(200, data)
+            self._send_json_bytes(200, raw_bytes, gzip_bytes)
+            return
+
+        if self.path == '/api/bootstrap':
+            refresh_cache_if_changed()
+
+            with cache_lock:
+                raw_bytes = bootstrap_cache_json_bytes or _payload_to_bytes(_empty_courses_payload())
+                gzip_bytes = bootstrap_cache_json_gzip_bytes or None
+
+            self._send_json_bytes(200, raw_bytes, gzip_bytes)
+            return
+
+        if self.path == '/api/cache-meta':
+            refresh_cache_if_changed()
+
+            with cache_lock:
+                raw_bytes = cache_meta_json_bytes or _payload_to_bytes({
+                    'cache_file_path': cache_file_path,
+                    'source': cache_source,
+                    'mtime': _format_epoch_to_iso(cache_mtime),
+                    'mtimeEpoch': cache_mtime,
+                    'stats': _normalize_stats((courses_cache or {}).get('stats')),
+                    'payloadBytes': {'full': 0, 'bootstrap': 0},
+                })
+                gzip_bytes = cache_meta_json_gzip_bytes or None
+
+            self._send_json_bytes(200, raw_bytes, gzip_bytes)
+            return
+
+        if self.path.startswith('/api/course-detail/'):
+            refresh_cache_if_changed()
+
+            parsed = urlparse(self.path)
+            parts = [unquote(segment) for segment in parsed.path.split('/') if segment]
+            if len(parts) != 5:
+                self._send_json(400, {
+                    'error': 'invalid_course_detail_path',
+                    'expected': '/api/course-detail/<catId>/<routeId>/<courseId>',
+                })
+                return
+
+            _, _, cat_ref, route_ref, course_ref = parts
+            with cache_lock:
+                data = courses_cache or _empty_courses_payload()
+
+            match = _resolve_course_detail_refs(data, cat_ref, route_ref, course_ref)
+            if not match:
+                self._send_json(404, {
+                    'error': 'course_not_found',
+                    'catRef': cat_ref,
+                    'routeRef': route_ref,
+                    'courseRef': course_ref,
+                })
+                return
+
+            payload = _build_course_detail_payload(match)
+            self._send_json(200, payload)
             return
         
         # Refrescar caché
@@ -338,89 +865,76 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             
             ds = get_drive_service()
             if not ds:
-                self.send_error(503, 'Drive service not available')
+                error_detail = get_drive_service_error()
+                hint = (
+                    'Drive service not available. '
+                    'Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or '
+                    'GOOGLE_SERVICE_ACCOUNT_JSON.'
+                )
+                if error_detail:
+                    self._safe_send_error(503, f'{hint} Detail: {error_detail}')
+                else:
+                    self._safe_send_error(503, hint)
                 return
             
             try:
-                # Get file metadata for content type and size
-                metadata = ds.get_file_metadata(file_id)
-                mime_type = metadata.get('mimeType', 'application/octet-stream')
-                file_size = int(metadata.get('size', 0))
-                is_video = mime_type and mime_type.startswith('video')
-                
-                # Fix mime types that Drive returns as generic
-                file_name = metadata.get('name', '')
-                if mime_type == 'application/octet-stream':
-                    guessed, _ = mimetypes.guess_type(file_name)
-                    if guessed:
-                        mime_type = guessed
-                
                 range_header = self.headers.get('Range')
-                
-                if range_header and file_size > 0:
-                    range_match = re.match(r'^bytes=(\d*)-(\d*)$', range_header)
-                    if not range_match:
-                        self.send_error(416, 'Invalid range header')
+
+                if range_header:
+                    sanitized_range = str(range_header).strip()
+                    if ',' in sanitized_range or not re.match(r'^bytes=\d*-\d*$', sanitized_range):
+                        self._safe_send_error(416, 'Invalid range header')
                         return
-
-                    start_str, end_str = range_match.groups()
-                    start = int(start_str) if start_str else 0
-                    end = int(end_str) if end_str else file_size - 1
-
-                    if start < 0 or end < 0 or start > end or start >= file_size:
-                        self.send_error(416, 'Requested Range Not Satisfiable')
-                        return
-
-                    end = min(end, file_size - 1)
-                    content_length = end - start + 1
-                    
-                    # Stream from Drive
-                    resp = ds.download_file_range(file_id, start, end)
-                    
-                    self.send_response(206)
-                    self.send_header('Content-Type', mime_type)
-                    self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
-                    self.send_header('Content-Length', content_length)
-                    self.send_header('Accept-Ranges', 'bytes')
-                    self._set_cors_headers()
-                    self.send_header('Connection', 'keep-alive')
-                    if is_video:
-                        self.send_header('Cache-Control', 'public, max-age=3600')
-                    self.end_headers()
-                    
-                    try:
-                        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                self.wfile.write(chunk)
-                    except OSError as error:
-                        if not self._is_client_disconnect_error(error):
-                            raise
+                    resp = ds.download_file_range(file_id, range_header=sanitized_range)
                 else:
-                    # Full file download
                     resp = ds.download_file_range(file_id)
-                    
-                    self.send_response(200)
-                    self.send_header('Content-Type', mime_type)
-                    if file_size > 0:
-                        self.send_header('Content-Length', file_size)
-                    self.send_header('Accept-Ranges', 'bytes')
-                    self._set_cors_headers()
-                    if is_video:
-                        self.send_header('Cache-Control', 'public, max-age=3600')
-                    self.end_headers()
-                    
-                    try:
-                        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                self.wfile.write(chunk)
-                    except OSError as error:
-                        if not self._is_client_disconnect_error(error):
-                            raise
+
+                status_code = resp.status_code
+                mime_type = resp.headers.get('Content-Type', 'application/octet-stream')
+                is_video = mime_type.startswith('video')
+                content_range = resp.headers.get('Content-Range')
+                content_length = resp.headers.get('Content-Length')
+
+                self.send_response(status_code)
+                self.send_header('Content-Type', mime_type)
+                if content_range:
+                    self.send_header('Content-Range', content_range)
+                if content_length:
+                    self.send_header('Content-Length', content_length)
+                self.send_header('Accept-Ranges', 'bytes')
+                self._set_cors_headers()
+                if is_video:
+                    self.send_header('Cache-Control', 'public, max-age=3600')
+                self.end_headers()
+
+                start_time = time.time()
+                total_bytes = 0
+                try:
+                    # Optimización: Aumentar buffer a 1MB para reducir overhead y mejorar A/V sync
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            self.wfile.write(chunk)
+                            total_bytes += len(chunk)
+                except OSError as error:
+                    if not self._is_client_disconnect_error(error):
+                        raise
+                finally:
+                    duration = time.time() - start_time
+                    # Loguear métricas de streaming para detectar cuellos de botella
+                    if duration > 0.5:
+                        speed = (total_bytes / 1024 / 1024) / duration
+                        print(f"[STREAM] {file_id} | Range: {range_header or 'Full'} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)")
+                    resp.close()
             except Exception as e:
                 if self._is_client_disconnect_error(e):
                     return
 
-                print(f"❌ Drive streaming error for {file_id}: {e}")
+                drive_status = getattr(getattr(e, 'response', None), 'status_code', None)
+                if isinstance(drive_status, int):
+                    self._safe_send_error(drive_status, f'Drive error ({drive_status})')
+                    return
+
+                print(f"[ERROR] Drive streaming error for {file_id}: {e}")
                 self._safe_send_error(502, 'Failed to stream file from Drive')
             return
         
@@ -537,23 +1051,23 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
 def main():
     print("=" * 50)
-    print("🎓 Platzi Viewer - Drive API Server")
+    print("Platzi Viewer - Drive API Server")
     print("=" * 50)
-    print(f"🌐 URL: http://localhost:{PORT}")
+    print(f"URL: http://{DISPLAY_HOST}:{PORT}")
     print("=" * 50)
     print()
     
     # Cargar caché ANTES de iniciar el servidor
-    server = create_server('localhost', PORT)
+    server = create_server(BIND_HOST, PORT)
     
     try:
         run_server(server)
     except KeyboardInterrupt:
-        print("\n🛑 Servidor detenido")
+        print("\n[INFO] Servidor detenido")
         server.shutdown()
 
 
-def create_server(host='localhost', port=PORT):
+def create_server(host=BIND_HOST, port=PORT):
     init_cache()
     return ThreadingHTTPServer((host, port), PlatziHandler)
 

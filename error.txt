@@ -1,0 +1,8 @@
+Iniciando inyección de cursos en PlatziRoutes.md...
+ -> [Inglés Avanzado C1] 0 cursos nuevos añadidos.
+ -> [Inglés Básico A1] 0 cursos nuevos añadidos.
+ -> [Inglés Básico A2] 0 cursos nuevos añadidos.
+ -> [Inglés Intermedio Alto B2] 0 cursos nuevos añadidos.
+ -> [Inglés Intermedio B1] 0 cursos nuevos añadidos.
+ -> [Inglés para Propósitos Específicos] 0 cursos nuevos añadidos.
+❌ Error crítico durante la inyección de rutas: ValueError("Target course no encontrado: '- [Curso de Rust básico](https://platzi.com/cursos/rust/)'. No se pudo insertar nuevos cursos.")

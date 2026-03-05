@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated README with complete feature documentation
 - Restructured project documentation
 
+## [1.0.1] - 2026-03-05
+
+### Fixed
+- Stopped residual audio playback when leaving the player view by hardening view teardown lifecycle (`destroy`) and canceling pending playback callbacks.
+- Added global media shutdown on route transitions so any remaining `video/audio` element is paused and detached before rendering the next view.
+- Improved A/V sync stability for heavy classes by adding adaptive drift correction and sustained dropped-frame detection.
+- Added automatic quality downshift in Auto mode under severe/repeated dropped-frame conditions to reduce long-session desynchronization.
+
+### Changed
+- Improved player lifecycle cleanup to prevent delayed `play()` calls after navigation.
+- Extended sync guard logic with cooldowns and resilient resync strategy.
+
 ## [1.0.0] - 2024-02-17
 
 ### Added
@@ -81,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Status | Key Changes |
 |---------|------|--------|-------------|
-| 1.0.0 | 2024-02-17 | Current | Initial release with core functionality |
+| 1.0.1 | 2026-03-05 | Current | Playback lifecycle hardening and adaptive A/V sync fixes |
+| 1.0.0 | 2024-02-17 | Stable | Initial release with core functionality |
 | 1.1.0 | Planned | In Development | Critical bug fixes and security improvements |
 | 1.2.0 | Planned | Planned | Feature enhancements and PWA support |
 | 2.0.0 | Planned | Future | Major architecture overhaul and new features |

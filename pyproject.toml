@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [".git", "node_modules", "venv", ".venv", "env"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "C90", "N", "B", "A", "UP"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 120
+target-version = ['py310']

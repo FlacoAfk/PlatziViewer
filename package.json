@@ -1,6 +1,6 @@
 {
   "name": "platzi-viewer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Plataforma web para visualizar y organizar cursos de Platzi de manera local",
   "main": "index.html",
   "scripts": {

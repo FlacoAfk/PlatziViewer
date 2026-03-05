@@ -1,0 +1,60 @@
+/* ===== Availability Indicators ===== */
+.route-empty {
+    opacity: 0.5;
+    border-color: rgba(255, 80, 80, 0.15);
+}
+
+.route-empty::before {
+    background: linear-gradient(90deg, #ff5050, #ff8080);
+}
+
+.route-partial {
+    border-color: rgba(255, 180, 50, 0.2);
+}
+
+.route-partial::before {
+    background: linear-gradient(90deg, #ffb432, #ffd080);
+}
+
+.course-unavailable {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
+.course-unavailable .course-thumbnail {
+    background: linear-gradient(135deg, rgba(255, 80, 80, 0.1), rgba(180, 80, 80, 0.1));
+}
+
+.badge-unavailable {
+    display: inline-block;
+    font-size: 0.68rem;
+    background: rgba(255, 80, 80, 0.15);
+    color: #ff8080;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+
+/* ===== Error & Empty States ===== */
+.error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 50vh;
+    gap: 16px;
+    padding: 40px;
+    text-align: center;
+}
+
+.error-state a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.error-state a:hover {
+    text-decoration: underline;
+}

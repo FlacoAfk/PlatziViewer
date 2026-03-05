@@ -1,0 +1,234 @@
+/* ===== Grid Layout ===== */
+.grid-routes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+
+/* ===== Course 2-Column Layout ===== */
+.course-layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 32px;
+    align-items: start;
+}
+
+.course-main {
+    min-width: 0;
+}
+
+.course-sidebar {
+    position: sticky;
+    top: 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* --- Sidebar Panels --- */
+.sidebar-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    transition: var(--transition);
+}
+
+.sidebar-panel:hover {
+    border-color: rgba(0, 214, 143, 0.18);
+}
+
+.panel-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* --- Large Progress Ring --- */
+.panel-progress {
+    text-align: center;
+}
+
+.progress-ring-lg {
+    width: 130px;
+    height: 130px;
+    margin: 0 auto 16px;
+    position: relative;
+}
+
+.progress-ring-lg svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.ring-bg-lg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.06);
+    stroke-width: 8;
+}
+
+.ring-fill-lg {
+    fill: none;
+    stroke: url(#progressGradient);
+    stroke: var(--accent-primary);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dasharray 1s cubic-bezier(0.4, 0, 0.2, 1);
+    filter: drop-shadow(0 0 6px rgba(0, 214, 143, 0.4));
+}
+
+.ring-fill-lg.ring-complete {
+    stroke: var(--accent-primary);
+    filter: drop-shadow(0 0 12px rgba(0, 214, 143, 0.6));
+}
+
+.ring-text-lg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+}
+
+.ring-pct {
+    font-size: 1.6rem;
+    font-weight: 700;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.progress-stats {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.progress-stat-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.stat-dot.complete {
+    background: var(--accent-primary);
+    box-shadow: 0 0 6px rgba(0, 214, 143, 0.5);
+}
+
+.stat-dot.remaining {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Resource Links --- */
+.resource-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.resource-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    transition: var(--transition);
+    font-size: 0.84rem;
+    text-decoration: none;
+}
+
+.resource-link:hover {
+    background: rgba(0, 214, 143, 0.08);
+    color: var(--accent-primary);
+    transform: translateX(3px);
+}
+
+.resource-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+}
+
+.resource-text {
+    flex: 1;
+}
+
+.resource-arrow {
+    font-size: 0.75rem;
+    opacity: 0;
+    transition: var(--transition);
+    color: var(--accent-primary);
+}
+
+.resource-link:hover .resource-arrow {
+    opacity: 1;
+}
+
+/* --- Notes Textarea --- */
+.notes-textarea {
+    width: 100%;
+    min-height: 150px;
+    max-height: 400px;
+    padding: 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.notes-textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(0, 214, 143, 0.1);
+}
+
+.notes-textarea::placeholder {
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    font-style: italic;
+}
+
+.notes-footer {
+    margin-top: 8px;
+    text-align: right;
+}
+
+.notes-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+/* --- Course Layout Responsive --- */
+@media (max-width: 1024px) {
+    .course-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .course-sidebar {
+        position: static;
+    }
+}

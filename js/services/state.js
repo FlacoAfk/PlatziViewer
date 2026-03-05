@@ -1,4 +1,4 @@
-import { ApiService, API_URL } from './api.js';
+import { ApiService } from './api.js';
 
 class StateService {
     constructor() {
@@ -7,11 +7,14 @@ class StateService {
         this.storageKey = 'platzi_progress';
         this.listeners = [];
         this._syncTimer = null;
+        this._courseDetailLoads = new Map();
+        this.initWarnings = [];
     }
 
     async init() {
-        // Load courses data (required)
-        this.coursesData = await ApiService.getCourses();
+        this.initWarnings = [];
+        // Carga inicial ligera
+        this.coursesData = await ApiService.getBootstrap();
 
         const localProgress = this.loadLocalProgress();
         const serverProgress = await this.loadServerProgress();
@@ -24,12 +27,15 @@ class StateService {
 
     async loadServerProgress() {
         try {
-            const response = await fetch(`${API_URL}/api/progress`, { cache: 'no-store' });
-            if (!response.ok) return {};
-            const data = await response.json();
-            return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+            return await ApiService.getProgress();
         } catch (e) {
-            console.warn('Error loading server progress:', e);
+            const code = e?.code || 'progress_unavailable';
+            this.initWarnings.push({
+                code,
+                endpoint: '/api/progress',
+                message: 'No se pudo cargar el progreso del servidor. Se usará solo progreso local.',
+            });
+            console.warn('Error loading server progress:', code, e);
             return {};
         }
     }
@@ -99,13 +105,9 @@ class StateService {
 
     async saveServerProgress() {
         try {
-            await fetch(`${API_URL}/api/progress`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(this.progress)
-            });
+            await ApiService.saveProgress(this.progress);
         } catch (e) {
-            console.warn('Error saving server progress:', e);
+            console.warn('Error saving server progress:', e?.code || e);
         }
     }
 
@@ -160,6 +162,66 @@ class StateService {
         return mod.classes[classIdx] || null;
     }
 
+    isCourseDetailLoaded(course) {
+        if (!course) return false;
+        if (course.foundInDrive === false) return true;
+        if (!Array.isArray(course.modules)) return false;
+        if (course.modules.length === 0) return (course.classCount || 0) === 0;
+        return course.modules.some((mod) => Array.isArray(mod?.classes));
+    }
+
+    async ensureCourseDetail(catIdx, routeIdx, courseIdx = 0) {
+        const course = this.getCourse(catIdx, routeIdx, courseIdx);
+        const route = this.getRoute(catIdx, routeIdx);
+        if (!course || !route) return null;
+        if (this.isCourseDetailLoaded(course)) return course;
+
+        const key = `${catIdx}|${routeIdx}|${courseIdx}`;
+        if (this._courseDetailLoads.has(key)) {
+            return this._courseDetailLoads.get(key);
+        }
+
+        const loadPromise = (async () => {
+            const payload = await ApiService.getCourseDetail(catIdx, routeIdx, courseIdx, 2);
+            const detail = payload?.course;
+            if (!detail) {
+                const err = new Error('course_detail_invalid_payload');
+                err.code = 'course_detail_invalid_payload';
+                throw err;
+            }
+
+            const categories = this.coursesData?.categories || [];
+            const cat = categories[catIdx];
+            if (!cat?.routes?.[routeIdx]) {
+                const err = new Error('course_detail_route_missing');
+                err.code = 'course_detail_route_missing';
+                throw err;
+            }
+
+            if (route.isCourse) {
+                cat.routes[routeIdx] = detail;
+            } else {
+                const courses = cat.routes[routeIdx].courses || [];
+                if (!courses[courseIdx]) {
+                    const err = new Error('course_detail_course_missing');
+                    err.code = 'course_detail_course_missing';
+                    throw err;
+                }
+                courses[courseIdx] = detail;
+                cat.routes[routeIdx].courses = courses;
+            }
+
+            return this.getCourse(catIdx, routeIdx, courseIdx);
+        })();
+
+        this._courseDetailLoads.set(key, loadPromise);
+        try {
+            return await loadPromise;
+        } finally {
+            this._courseDetailLoads.delete(key);
+        }
+    }
+
     // Safe accessor for module classes (handles number vs array)
     getModuleClasses(mod) {
         if (!mod) return [];
@@ -205,27 +267,30 @@ class StateService {
 
     /** Count total classes in a course (handles number-type classes) */
     countCourseClasses(course) {
-        if (!course?.modules) return 0;
-        return course.modules.reduce((sum, mod) => {
+        if (!course) return 0;
+        if (!Array.isArray(course.modules) || course.modules.length === 0) {
+            return typeof course.classCount === 'number' ? course.classCount : 0;
+        }
+        const computed = course.modules.reduce((sum, mod) => {
             if (Array.isArray(mod.classes)) return sum + mod.classes.length;
             if (typeof mod.classes === 'number') return sum + mod.classes;
             return sum;
         }, 0);
+        if (computed === 0 && typeof course.classCount === 'number') {
+            return course.classCount;
+        }
+        return computed;
     }
 
     /** Count completed classes for a specific course at given indices */
     countCourseCompleted(catIdx, routeIdx, courseIdx) {
-        let completed = 0;
-        const course = this.getCourse(catIdx, routeIdx, courseIdx);
-        if (!course?.modules) return 0;
-        course.modules.forEach((mod, modIdx) => {
-            const classes = this.getModuleClasses(mod);
-            classes.forEach((_, classIdx) => {
-                const key = this.getClassKey(catIdx, routeIdx, courseIdx, modIdx, classIdx);
-                if (this.isClassComplete(key)) completed++;
-            });
-        });
-        return completed;
+        const prefix = `${catIdx}|${routeIdx}|${courseIdx}|`;
+        return Object.entries(this.progress).reduce((count, [key, record]) => {
+            if (key.startsWith(prefix) && record?.status === 'complete') {
+                return count + 1;
+            }
+            return count;
+        }, 0);
     }
 
     /** Get progress fraction for a course (0-1) */
@@ -344,6 +409,14 @@ class StateService {
 
     notifyListeners() {
         this.listeners.forEach(cb => cb(this.progress));
+    }
+
+    getInitWarnings() {
+        return [...this.initWarnings];
+    }
+
+    clearInitWarnings() {
+        this.initWarnings = [];
     }
 
     getData() { return this.coursesData; }

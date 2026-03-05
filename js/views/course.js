@@ -5,12 +5,24 @@ export default class CourseView {
         this.catIdx = parseInt(params.catIdx);
         this.routeIdx = parseInt(params.routeIdx);
         this.courseIdx = parseInt(params.courseIdx);
-        this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx);
-        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
+        this.courseData = null;
+        this.routeData = null;
+        this.detailErrorCode = null;
     }
 
     async render() {
+        this.routeData = state.getRoute(this.catIdx, this.routeIdx);
+        this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx);
+
         if (!this.courseData) return '<div class="error-state"><h2>⚠️ Curso no encontrado</h2><a href="#home">← Volver al inicio</a></div>';
+
+        try {
+            this.courseData = await state.ensureCourseDetail(this.catIdx, this.routeIdx, this.courseIdx) || this.courseData;
+        } catch (error) {
+            this.detailErrorCode = error?.code || 'course_detail_unavailable';
+            // Fallback al bootstrap para no bloquear la vista completa.
+            this.courseData = state.getCourse(this.catIdx, this.routeIdx, this.courseIdx) || this.courseData;
+        }
 
         const modules = this.courseData.modules || [];
         const totalClasses = modules.reduce((sum, m) => {
@@ -44,6 +56,11 @@ export default class CourseView {
                 <div class="course-layout">
                     <!-- ═══ Left Column: Main Content ═══ -->
                     <div class="course-main">
+                        ${this.detailErrorCode ? `
+                            <div style="margin-bottom: 1rem; padding: 10px 12px; border: 1px solid rgba(255,196,0,.22); background: rgba(255,196,0,.07); color: #ffd36a; border-radius: 10px; font-size: .9rem;">
+                                ⚠️ No se pudo cargar el detalle completo del curso (<code style="background: rgba(0,0,0,.25); padding: 2px 6px; border-radius: 6px;">${this.detailErrorCode}</code>).
+                            </div>
+                        ` : ''}
                         <header class="course-hero">
                             <div class="hero-content" style="text-align:left;">
                                 ${this.routeData && !this.routeData.isCourse ? `<span class="badge-route">📂 ${this.routeData.name}</span>` : ''}

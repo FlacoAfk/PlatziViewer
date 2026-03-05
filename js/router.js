@@ -7,6 +7,27 @@ export class Router {
         window.addEventListener('hashchange', () => this.handleRoute());
     }
 
+    _stopAllMediaPlayback() {
+        const mediaElements = document.querySelectorAll('video, audio');
+        mediaElements.forEach((mediaEl) => {
+            try {
+                mediaEl.pause();
+            } catch (error) {
+                // no-op
+            }
+
+            try {
+                if (mediaEl.srcObject) mediaEl.srcObject = null;
+                mediaEl.removeAttribute('src');
+                const sourceTags = mediaEl.querySelectorAll('source');
+                sourceTags.forEach((source) => source.removeAttribute('src'));
+                mediaEl.load();
+            } catch (error) {
+                // no-op
+            }
+        });
+    }
+
     async handleRoute() {
         const hash = window.location.hash || '#home';
 
@@ -49,6 +70,8 @@ export class Router {
     }
 
     async renderView(ViewClass, params) {
+        this._stopAllMediaPlayback();
+
         if (this.currentView && this.currentView.destroy) {
             this.currentView.destroy();
         }

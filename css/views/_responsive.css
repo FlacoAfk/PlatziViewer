@@ -1,0 +1,208 @@
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+    .navbar {
+        padding: 0 16px;
+    }
+
+    .nav-links {
+        display: none;
+    }
+
+    .hero-section {
+        padding: 32px 20px 24px;
+    }
+
+    .hero-section h1 {
+        font-size: 1.7rem;
+    }
+
+    .categories-section,
+    .routes-section {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .grid-routes {
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+
+    .view-route,
+    .view-course {
+        padding: 20px 16px;
+    }
+
+    .view-player {
+        flex-direction: column;
+        height: auto;
+        min-height: calc(100vh - 56px);
+    }
+
+    .player-sidebar {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid var(--border-color);
+        max-height: 42vh;
+        min-height: 120px;
+    }
+
+    .player-info-bar {
+        flex-wrap: wrap;
+        row-gap: 10px;
+    }
+
+    .player-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .player-actions .btn-action-pill {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .player-resources-section {
+        padding: 18px 16px 24px;
+    }
+
+    .view-explore,
+    .view-learning {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .progress-card-info h4 {
+        white-space: normal;
+    }
+}
+
+@media (hover: none),
+(pointer: coarse) {
+    .view-home.touch-categories .category-routes-section .category-routes-body {
+        display: none;
+    }
+
+    .view-home.touch-categories .category-routes-section.is-open .category-routes-body {
+        display: block;
+    }
+
+    .view-home.touch-categories .category-routes-section {
+        margin-bottom: 12px;
+    }
+
+    .view-home.touch-categories .category-routes-section .section-header {
+        margin-bottom: 0;
+    }
+
+    .player-sidebar-fab {
+        display: none;
+    }
+
+    .view-player.touch-mode .player-sidebar-fab {
+        display: none !important;
+    }
+
+    .sidebar-classes-toggle {
+        display: inline-flex;
+    }
+
+    .sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .yt-controls-row {
+        padding: 6px 8px 8px;
+        display: grid;
+        grid-template-columns: 1fr;
+        row-gap: 4px;
+    }
+
+    .yt-controls-left,
+    .yt-controls-right {
+        width: 100%;
+    }
+
+    .yt-controls-right {
+        justify-content: flex-end;
+        gap: 2px;
+    }
+
+    .yt-progress {
+        margin: 0 8px;
+    }
+
+    .yt-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .yt-time {
+        font-size: 0.72rem;
+        margin-left: auto;
+    }
+
+    #ytSpeed {
+        padding: 0 10px;
+        font-size: 0.8rem;
+        min-width: 44px;
+        height: 44px;
+    }
+
+    .yt-quality-btn {
+        min-width: 68px;
+        max-width: 92px;
+        padding: 0 8px;
+        font-size: 0.72rem;
+    }
+
+    .yt-quality-menu {
+        width: 156px;
+        max-height: 190px;
+    }
+
+    .resource-file-item {
+        gap: 10px;
+        padding: 10px 12px;
+    }
+
+    .rf-action {
+        padding: 6px 10px;
+        font-size: 0.74rem;
+    }
+}
+
+@media (max-width: 430px) {
+    .yt-controls-left {
+        gap: 2px;
+    }
+
+    .yt-time {
+        font-size: 0.68rem;
+        letter-spacing: -0.01em;
+    }
+
+    #ytSpeed {
+        padding: 0 6px;
+        min-width: 44px;
+        height: 44px;
+    }
+
+    .yt-btn {
+        width: 44px;
+        height: 44px;
+    }
+}
+
+@media (max-width: 900px) {
+    .player-sidebar-fab {
+        display: none;
+    }
+}

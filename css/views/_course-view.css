@@ -1,0 +1,426 @@
+/* ===== Course View ===== */
+.view-course {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 32px 40px;
+}
+
+.course-hero {
+    margin-bottom: 32px;
+}
+
+.hero-content {
+    text-align: center;
+    padding: 16px 0;
+}
+
+.badge-route {
+    display: inline-block;
+    background: rgba(0, 214, 143, 0.12);
+    color: var(--accent-primary);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.hero-content h1 {
+    font-size: 1.8rem;
+    margin-bottom: 8px;
+}
+
+.course-desc {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+}
+
+
+/* ===== Syllabus ===== */
+.syllabus-section {
+    margin-top: 16px;
+}
+
+.syllabus-section h2 {
+    font-size: 1.15rem;
+    margin-bottom: 14px;
+    font-weight: 600;
+}
+
+.accordion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+
+/* ===== Module Accordion ===== */
+.module-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    transition: var(--transition);
+}
+
+.module-item:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.module-header {
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    background: var(--bg-secondary);
+    transition: var(--transition);
+    gap: 12px;
+}
+
+.module-header:hover {
+    background: var(--bg-card-hover);
+}
+
+.module-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.module-num {
+    width: 26px;
+    height: 26px;
+    background: rgba(0, 214, 143, 0.12);
+    color: var(--accent-primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.module-header-left h3 {
+    font-size: 0.87rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.module-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.class-count {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.progress-bar-mini {
+    width: 50px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.toggle-icon {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    transition: transform 0.25s ease;
+}
+
+.module-item.active .toggle-icon {
+    transform: rotate(180deg);
+}
+
+.module-body {
+    display: none;
+    padding: 2px 0;
+}
+
+.module-item.active .module-body {
+    display: block;
+}
+
+
+/* ===== Learning View ===== */
+.view-learning {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 40px 40px;
+}
+
+.learning-hero {
+    text-align: center;
+    padding: 48px 0 12px;
+}
+
+.learning-hero h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+}
+
+.learning-hero p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+/* === Stats Grid === */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 24px 0;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 18px 14px;
+    text-align: center;
+    transition: var(--transition);
+}
+
+.stat-card:hover {
+    border-color: rgba(0, 214, 143, 0.25);
+    transform: translateY(-2px);
+}
+
+.stat-icon {
+    font-size: 1.6rem;
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.stat-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.stat-subtitle {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* === Global Progress Bar === */
+.global-progress-section {
+    margin-bottom: 28px;
+}
+
+.global-bar-track {
+    height: 8px;
+    background: var(--bg-card);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.global-bar-fill {
+    height: 100%;
+    background: var(--accent-gradient);
+    border-radius: 4px;
+    transition: width 0.8s ease;
+    min-width: 2px;
+}
+
+.global-bar-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 6px;
+}
+
+/* === Learning Sections === */
+.learning-section {
+    margin-bottom: 28px;
+}
+
+.learning-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.learning-section-header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.section-count {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    padding: 3px 10px;
+    border-radius: 12px;
+}
+
+/* === Progress Cards === */
+.progress-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: var(--transition);
+    gap: 16px;
+}
+
+.progress-card:hover {
+    background: var(--bg-card-hover);
+    border-color: rgba(0, 214, 143, 0.25);
+    transform: translateX(3px);
+}
+
+.progress-card.complete {
+    border-color: rgba(0, 214, 143, 0.15);
+}
+
+.progress-card-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1;
+}
+
+.progress-card-icon {
+    font-size: 1.8rem;
+    flex-shrink: 0;
+}
+
+.progress-card-info {
+    min-width: 0;
+}
+
+.progress-card-info h4 {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.progress-card-meta {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.meta-tag {
+    background: var(--bg-secondary);
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+}
+
+/* === SVG Progress Ring === */
+.progress-card-right {
+    flex-shrink: 0;
+}
+
+.progress-ring {
+    width: 48px;
+    height: 48px;
+    position: relative;
+}
+
+.progress-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.ring-bg {
+    fill: none;
+    stroke: var(--bg-secondary);
+    stroke-width: 3;
+}
+
+.ring-fill {
+    fill: none;
+    stroke: var(--accent-primary);
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.8s ease;
+}
+
+.ring-fill.ring-complete {
+    stroke: var(--accent-primary);
+}
+
+.ring-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+/* === Empty Learning State === */
+.empty-learning {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.empty-learning .empty-icon {
+    font-size: 3.5rem;
+    margin-bottom: 14px;
+}
+
+.empty-learning h3 {
+    font-size: 1.3rem;
+    margin-bottom: 8px;
+}
+
+.empty-learning p {
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    margin-bottom: 20px;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+}
