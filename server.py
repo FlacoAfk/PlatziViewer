@@ -16,22 +16,23 @@ import threading
 import time
 import subprocess
 import shutil
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIEWER_PATH = os.environ.get('PLATZI_VIEWER_PATH', BASE_DIR)
-DATA_PATH = os.environ.get('PLATZI_DATA_PATH', VIEWER_PATH)
-PORT = int(os.environ.get('PORT', '8080'))
-BIND_HOST = os.environ.get('HOST', '127.0.0.1')
-DISPLAY_HOST = os.environ.get('PUBLIC_HOST', BIND_HOST)
+VIEWER_PATH = os.environ.get("PLATZI_VIEWER_PATH", BASE_DIR)
+DATA_PATH = os.environ.get("PLATZI_DATA_PATH", VIEWER_PATH)
+PORT = int(os.environ.get("PORT", "8080"))
+BIND_HOST = os.environ.get("HOST", "127.0.0.1")
+DISPLAY_HOST = os.environ.get("PUBLIC_HOST", BIND_HOST)
 PROGRESS_FILE = os.path.join(DATA_PATH, "progress.json")
 VIEWER_CACHE_FILE = os.path.join(VIEWER_PATH, "courses_cache.json")
 DATA_CACHE_FILE = os.path.join(DATA_PATH, "courses_cache.json")
-MAX_PROGRESS_BYTES = int(os.environ.get('MAX_PROGRESS_BYTES', '2097152'))  # 2MB
-LOOPBACK_HOSTS = {'localhost', '127.0.0.1', '::1'}
+MAX_PROGRESS_BYTES = int(os.environ.get("MAX_PROGRESS_BYTES", "2097152"))  # 2MB
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 EMPTY_STATS = {
-    'totalCategories': 0,
-    'totalRoutes': 0,
-    'totalCourses': 0,
-    'totalClasses': 0,
+    "totalCategories": 0,
+    "totalRoutes": 0,
+    "totalCourses": 0,
+    "totalClasses": 0,
 }
 
 # Caché global
@@ -42,22 +43,22 @@ cache_lock = threading.Lock()
 cache_reload_lock = threading.Lock()
 cache_mtime = None
 cache_file_path = None
-cache_source = 'none'
+cache_source = "none"
 invalid_cache_files = {}
 
-full_cache_json_bytes = b''
-full_cache_json_gzip_bytes = b''
-bootstrap_cache_json_bytes = b''
-bootstrap_cache_json_gzip_bytes = b''
-cache_meta_json_bytes = b''
-cache_meta_json_gzip_bytes = b''
+full_cache_json_bytes = b""
+full_cache_json_gzip_bytes = b""
+bootstrap_cache_json_bytes = b""
+bootstrap_cache_json_gzip_bytes = b""
+cache_meta_json_bytes = b""
+cache_meta_json_gzip_bytes = b""
 
 # Google Drive service (lazy loaded)
 _drive_service = None
 _drive_service_error = None
 _ffmpeg_executable = None
 _ffmpeg_checked = False
-DRIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{10,}$')
+DRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
 
 
 def _get_ffmpeg_executable():
@@ -67,19 +68,21 @@ def _get_ffmpeg_executable():
         return _ffmpeg_executable
 
     candidates = []
-    env_path = os.environ.get('FFMPEG_PATH', '').strip()
+    env_path = os.environ.get("FFMPEG_PATH", "").strip()
     if env_path:
         candidates.append(env_path)
 
-    which_ffmpeg = shutil.which('ffmpeg')
+    which_ffmpeg = shutil.which("ffmpeg")
     if which_ffmpeg:
         candidates.append(which_ffmpeg)
 
-    if os.name == 'nt':
-        candidates.extend([
-            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-            r"C:\ffmpeg\bin\ffmpeg.exe",
-        ])
+    if os.name == "nt":
+        candidates.extend(
+            [
+                r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+                r"C:\ffmpeg\bin\ffmpeg.exe",
+            ]
+        )
 
     seen = set()
     unique_candidates = []
@@ -95,7 +98,7 @@ def _get_ffmpeg_executable():
     for candidate in unique_candidates:
         try:
             completed = subprocess.run(
-                [candidate, '-version'],
+                [candidate, "-version"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=4,
@@ -114,77 +117,79 @@ def _get_ffmpeg_executable():
 def analyze_drive_references(data):
     """Validate that file references in cache are Drive IDs (not local refs)."""
     summary = {
-        'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'totalRefs': 0,
-        'validDriveRefs': 0,
-        'localRefs': 0,
-        'invalidRefs': 0,
-        'emptyRefs': 0,
-        'issues': []
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "totalRefs": 0,
+        "validDriveRefs": 0,
+        "localRefs": 0,
+        "invalidRefs": 0,
+        "emptyRefs": 0,
+        "issues": [],
     }
 
     def add_issue(location, value, reason):
-        if len(summary['issues']) < 30:
-            summary['issues'].append({
-                'location': location,
-                'value': value,
-                'reason': reason
-            })
+        if len(summary["issues"]) < 30:
+            summary["issues"].append({"location": location, "value": value, "reason": reason})
 
     def validate_ref(ref, location):
-        summary['totalRefs'] += 1
+        summary["totalRefs"] += 1
 
         if ref is None:
-            summary['emptyRefs'] += 1
+            summary["emptyRefs"] += 1
             return
 
         if not isinstance(ref, str):
-            summary['invalidRefs'] += 1
-            add_issue(location, str(ref), 'non_string_ref')
+            summary["invalidRefs"] += 1
+            add_issue(location, str(ref), "non_string_ref")
             return
 
         value = ref.strip()
         if not value:
-            summary['emptyRefs'] += 1
+            summary["emptyRefs"] += 1
             return
 
-        if value.startswith('local:'):
-            summary['localRefs'] += 1
-            add_issue(location, value, 'local_ref_detected')
+        if value.startswith("local:"):
+            summary["localRefs"] += 1
+            add_issue(location, value, "local_ref_detected")
             return
 
-        if value.startswith('http://') or value.startswith('https://'):
-            summary['invalidRefs'] += 1
-            add_issue(location, value, 'url_ref_detected')
+        if value.startswith("http://") or value.startswith("https://"):
+            summary["invalidRefs"] += 1
+            add_issue(location, value, "url_ref_detected")
             return
 
         if not DRIVE_ID_RE.match(value):
-            summary['invalidRefs'] += 1
-            add_issue(location, value, 'invalid_drive_id_format')
+            summary["invalidRefs"] += 1
+            add_issue(location, value, "invalid_drive_id_format")
             return
 
-        summary['validDriveRefs'] += 1
+        summary["validDriveRefs"] += 1
 
-    categories = (data or {}).get('categories', [])
+    categories = (data or {}).get("categories", [])
     for cat_idx, category in enumerate(categories):
-        routes = category.get('routes', [])
+        routes = category.get("routes", [])
         for route_idx, route in enumerate(routes):
-            courses = [route] if route.get('isCourse') else route.get('courses', [])
+            courses = [route] if route.get("isCourse") else route.get("courses", [])
             for course_idx, course in enumerate(courses):
-                modules = course.get('modules', [])
+                modules = course.get("modules", [])
                 for mod_idx, module in enumerate(modules):
-                    classes = module.get('classes', [])
+                    classes = module.get("classes", [])
                     for cls_idx, cls in enumerate(classes):
-                        files = cls.get('files', {}) or {}
+                        files = cls.get("files", {}) or {}
                         for field_name, ref in files.items():
-                            validate_ref(ref, f'cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].files.{field_name}')
+                            validate_ref(
+                                ref,
+                                f"cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].files.{field_name}",
+                            )
 
-                        resources = cls.get('resources', []) or []
+                        resources = cls.get("resources", []) or []
                         for res_idx, resource in enumerate(resources):
-                            validate_ref(resource.get('file'), f'cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].resources[{res_idx}].file')
+                            validate_ref(
+                                resource.get("file"),
+                                f"cat[{cat_idx}].route[{route_idx}].course[{course_idx}].mod[{mod_idx}].class[{cls_idx}].resources[{res_idx}].file",
+                            )
 
-    summary['ok'] = summary['localRefs'] == 0 and summary['invalidRefs'] == 0
-    summary['message'] = 'drive_only_ok' if summary['ok'] else 'drive_only_issues_found'
+    summary["ok"] = summary["localRefs"] == 0 and summary["invalidRefs"] == 0
+    summary["message"] = "drive_only_ok" if summary["ok"] else "drive_only_issues_found"
     return summary
 
 
@@ -193,6 +198,7 @@ def get_drive_service():
     if _drive_service is None:
         try:
             from drive_service import drive_service
+
             _drive_service = drive_service
             _drive_service_error = None
         except Exception as e:
@@ -206,43 +212,41 @@ def get_drive_service_error():
 
 
 def _empty_courses_payload():
-    return {'categories': [], 'stats': dict(EMPTY_STATS)}
+    return {"categories": [], "stats": dict(EMPTY_STATS)}
 
 
 def _normalize_stats(stats):
     raw = stats if isinstance(stats, dict) else {}
     return {
-        'totalCategories': int(raw.get('totalCategories', 0) or 0),
-        'totalRoutes': int(raw.get('totalRoutes', 0) or 0),
-        'totalCourses': int(raw.get('totalCourses', 0) or 0),
-        'totalClasses': int(raw.get('totalClasses', 0) or 0),
+        "totalCategories": int(raw.get("totalCategories", 0) or 0),
+        "totalRoutes": int(raw.get("totalRoutes", 0) or 0),
+        "totalCourses": int(raw.get("totalCourses", 0) or 0),
+        "totalClasses": int(raw.get("totalClasses", 0) or 0),
     }
 
 
 def _payload_to_bytes(payload):
-    return json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def _gzip_payload(raw_bytes):
-    return gzip.compress(raw_bytes, compresslevel=5) if raw_bytes else b''
+    return gzip.compress(raw_bytes, compresslevel=5) if raw_bytes else b""
 
 
 def _is_cache_data_valid(data):
     if not isinstance(data, dict):
         return False
-    categories = data.get('categories')
+    categories = data.get("categories")
     if not isinstance(categories, list):
         return False
-    stats = data.get('stats')
+    stats = data.get("stats")
     if stats is not None and not isinstance(stats, dict):
         return False
     return True
 
 
 def _get_cache_preference_order():
-    prefer_data = str(os.environ.get('PLATZI_PREFER_DATA_CACHE', '1')).strip().lower() in {
-        '1', 'true', 'yes', 'on'
-    }
+    prefer_data = str(os.environ.get("PLATZI_PREFER_DATA_CACHE", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if prefer_data:
         return [DATA_CACHE_FILE, VIEWER_CACHE_FILE]
     return [VIEWER_CACHE_FILE, DATA_CACHE_FILE]
@@ -250,13 +254,13 @@ def _get_cache_preference_order():
 
 def _cache_source_from_path(path):
     if not path:
-        return 'none'
+        return "none"
     normalized = os.path.abspath(path)
     if normalized == os.path.abspath(DATA_CACHE_FILE):
-        return 'data'
+        return "data"
     if normalized == os.path.abspath(VIEWER_CACHE_FILE):
-        return 'viewer'
-    return 'external'
+        return "viewer"
+    return "external"
 
 
 def _mark_cache_invalid(path, mtime):
@@ -278,7 +282,7 @@ def _is_known_invalid_cache(path, mtime):
 
 def _load_cache_file(path):
     if not os.path.exists(path):
-        return None, None, 'missing_file'
+        return None, None, "missing_file"
 
     try:
         mtime = os.path.getmtime(path)
@@ -286,33 +290,33 @@ def _load_cache_file(path):
         return None, None, str(e)
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not _is_cache_data_valid(data):
-            raise ValueError('courses_cache.json inválido: schema básico no cumple')
+            raise ValueError("courses_cache.json inválido: schema básico no cumple")
         return data, mtime, None
     except Exception as e:
         return None, mtime, str(e)
 
 
 def _slugify(value):
-    text = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode('ascii')
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
     text = text.lower()
-    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
     return text
 
 
 def _extract_url_slug(url_value):
     try:
-        parsed = urlparse(str(url_value or '').strip())
-        pieces = [segment for segment in parsed.path.split('/') if segment]
-        return pieces[-1] if pieces else ''
+        parsed = urlparse(str(url_value or "").strip())
+        pieces = [segment for segment in parsed.path.split("/") if segment]
+        return pieces[-1] if pieces else ""
     except Exception:
-        return ''
+        return ""
 
 
 def _module_class_count(module):
-    classes = (module or {}).get('classes', [])
+    classes = (module or {}).get("classes", [])
     if isinstance(classes, list):
         return len(classes)
     if isinstance(classes, int):
@@ -326,53 +330,55 @@ def _summarize_modules(modules):
     for idx, module in enumerate(modules or []):
         class_count = _module_class_count(module)
         total_classes += class_count
-        summaries.append({
-            'name': (module or {}).get('name') or f'Módulo {idx + 1}',
-            'classCount': class_count,
-            # Mantener compatibilidad con frontend actual: classes numérico.
-            'classes': class_count,
-        })
+        summaries.append(
+            {
+                "name": (module or {}).get("name") or f"Módulo {idx + 1}",
+                "classCount": class_count,
+                # Mantener compatibilidad con frontend actual: classes numérico.
+                "classes": class_count,
+            }
+        )
     return summaries, total_classes
 
 
 def _course_public_id(course):
-    slug = _extract_url_slug((course or {}).get('url'))
+    slug = _extract_url_slug((course or {}).get("url"))
     if slug:
         return slug
 
-    course_id = str((course or {}).get('id') or '').strip()
+    course_id = str((course or {}).get("id") or "").strip()
     if course_id:
         return course_id
 
-    return _slugify((course or {}).get('name') or '')
+    return _slugify((course or {}).get("name") or "")
 
 
 def _build_bootstrap_course(course):
     raw = course or {}
-    modules_summary, computed_classes = _summarize_modules(raw.get('modules', []))
+    modules_summary, computed_classes = _summarize_modules(raw.get("modules", []))
 
-    module_count = raw.get('moduleCount')
+    module_count = raw.get("moduleCount")
     if not isinstance(module_count, int):
         module_count = len(modules_summary)
 
-    class_count = raw.get('classCount')
+    class_count = raw.get("classCount")
     if not isinstance(class_count, int):
         class_count = computed_classes
 
     return {
-        'name': raw.get('name', ''),
-        'folderName': raw.get('folderName', ''),
-        'url': raw.get('url', ''),
-        'id': raw.get('id', ''),
-        'publicId': _course_public_id(raw),
-        'moduleCount': module_count,
-        'classCount': class_count,
-        'foundInDrive': raw.get('foundInDrive', True),
-        'matchType': raw.get('matchType'),
-        'matchedFolder': raw.get('matchedFolder'),
-        'hasPresentation': raw.get('hasPresentation', False),
-        'presentationId': raw.get('presentationId', ''),
-        'modules': modules_summary,
+        "name": raw.get("name", ""),
+        "folderName": raw.get("folderName", ""),
+        "url": raw.get("url", ""),
+        "id": raw.get("id", ""),
+        "publicId": _course_public_id(raw),
+        "moduleCount": module_count,
+        "classCount": class_count,
+        "foundInDrive": raw.get("foundInDrive", True),
+        "matchType": raw.get("matchType"),
+        "matchedFolder": raw.get("matchedFolder"),
+        "hasPresentation": raw.get("hasPresentation", False),
+        "presentationId": raw.get("presentationId", ""),
+        "modules": modules_summary,
     }
 
 
@@ -380,21 +386,21 @@ def _build_bootstrap_route(route):
     raw = route or {}
 
     base = {
-        'id': raw.get('id', ''),
-        'name': raw.get('name', ''),
-        'url': raw.get('url', ''),
-        'isCourse': bool(raw.get('isCourse')),
+        "id": raw.get("id", ""),
+        "name": raw.get("name", ""),
+        "url": raw.get("url", ""),
+        "isCourse": bool(raw.get("isCourse")),
     }
 
-    if raw.get('isCourse'):
+    if raw.get("isCourse"):
         summary = _build_bootstrap_course(raw)
         base.update(summary)
-        base['isCourse'] = True
+        base["isCourse"] = True
         return base
 
-    courses = [_build_bootstrap_course(c) for c in raw.get('courses', [])]
-    base['courses'] = courses
-    base['courseCount'] = raw.get('courseCount', len(courses))
+    courses = [_build_bootstrap_course(c) for c in raw.get("courses", [])]
+    base["courses"] = courses
+    base["courseCount"] = raw.get("courseCount", len(courses))
     return base
 
 
@@ -402,23 +408,23 @@ def _build_bootstrap_payload(data):
     raw = data if isinstance(data, dict) else _empty_courses_payload()
     categories = []
 
-    for category in raw.get('categories', []):
-        routes = [_build_bootstrap_route(route) for route in (category or {}).get('routes', [])]
+    for category in raw.get("categories", []):
+        routes = [_build_bootstrap_route(route) for route in (category or {}).get("routes", [])]
         cat_payload = {
-            'id': (category or {}).get('id', ''),
-            'name': (category or {}).get('name', ''),
-            'icon': (category or {}).get('icon', ''),
-            'description': (category or {}).get('description', ''),
-            'type': (category or {}).get('type', ''),
-            'routes': routes,
+            "id": (category or {}).get("id", ""),
+            "name": (category or {}).get("name", ""),
+            "icon": (category or {}).get("icon", ""),
+            "description": (category or {}).get("description", ""),
+            "type": (category or {}).get("type", ""),
+            "routes": routes,
         }
-        if 'courseCount' in (category or {}):
-            cat_payload['courseCount'] = (category or {}).get('courseCount')
+        if "courseCount" in (category or {}):
+            cat_payload["courseCount"] = (category or {}).get("courseCount")
         categories.append(cat_payload)
 
     return {
-        'categories': categories,
-        'stats': _normalize_stats(raw.get('stats')),
+        "categories": categories,
+        "stats": _normalize_stats(raw.get("stats")),
     }
 
 
@@ -426,28 +432,28 @@ def _format_epoch_to_iso(epoch_value):
     if epoch_value is None:
         return None
     try:
-        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(float(epoch_value)))
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(epoch_value)))
     except Exception:
         return None
 
 
 def _build_cache_meta_payload(selected_cache_file, selected_mtime, data, full_bytes_len, bootstrap_bytes_len):
     return {
-        'cache_file_path': selected_cache_file,
-        'cache_file_name': os.path.basename(selected_cache_file) if selected_cache_file else None,
-        'source': _cache_source_from_path(selected_cache_file),
-        'mtime': _format_epoch_to_iso(selected_mtime),
-        'mtimeEpoch': selected_mtime,
-        'stats': _normalize_stats((data or {}).get('stats')),
-        'payloadBytes': {
-            'full': int(full_bytes_len or 0),
-            'bootstrap': int(bootstrap_bytes_len or 0),
+        "cache_file_path": selected_cache_file,
+        "cache_file_name": os.path.basename(selected_cache_file) if selected_cache_file else None,
+        "source": _cache_source_from_path(selected_cache_file),
+        "mtime": _format_epoch_to_iso(selected_mtime),
+        "mtimeEpoch": selected_mtime,
+        "stats": _normalize_stats((data or {}).get("stats")),
+        "payloadBytes": {
+            "full": int(full_bytes_len or 0),
+            "bootstrap": int(bootstrap_bytes_len or 0),
         },
     }
 
 
 def _ref_matches(ref_value, idx, candidates):
-    normalized = str(ref_value or '').strip().lower()
+    normalized = str(ref_value or "").strip().lower()
     if not normalized:
         return False
 
@@ -455,91 +461,91 @@ def _ref_matches(ref_value, idx, candidates):
         return True
 
     for candidate in candidates:
-        c = str(candidate or '').strip().lower()
+        c = str(candidate or "").strip().lower()
         if c and normalized == c:
             return True
     return False
 
 
 def _resolve_course_detail_refs(data, cat_ref, route_ref, course_ref):
-    categories = (data or {}).get('categories', [])
+    categories = (data or {}).get("categories", [])
 
     for cat_idx, category in enumerate(categories):
         cat_candidates = [
-            category.get('id'),
-            category.get('name'),
-            _slugify(category.get('name')),
+            category.get("id"),
+            category.get("name"),
+            _slugify(category.get("name")),
         ]
         if not _ref_matches(cat_ref, cat_idx, cat_candidates):
             continue
 
-        for route_idx, route in enumerate(category.get('routes', [])):
+        for route_idx, route in enumerate(category.get("routes", [])):
             route_candidates = [
-                route.get('id'),
-                route.get('name'),
-                _slugify(route.get('name')),
-                _extract_url_slug(route.get('url')),
+                route.get("id"),
+                route.get("name"),
+                _slugify(route.get("name")),
+                _extract_url_slug(route.get("url")),
             ]
             if not _ref_matches(route_ref, route_idx, route_candidates):
                 continue
 
-            if route.get('isCourse'):
+            if route.get("isCourse"):
                 course_candidates = [
-                    route.get('id'),
-                    route.get('name'),
-                    _slugify(route.get('name')),
-                    _extract_url_slug(route.get('url')),
+                    route.get("id"),
+                    route.get("name"),
+                    _slugify(route.get("name")),
+                    _extract_url_slug(route.get("url")),
                     _course_public_id(route),
                 ]
                 # Para rutas de curso único permitimos "0" además de IDs/slug.
                 if _ref_matches(course_ref, 0, course_candidates):
                     return {
-                        'catIdx': cat_idx,
-                        'routeIdx': route_idx,
-                        'courseIdx': 0,
-                        'category': category,
-                        'route': route,
-                        'course': route,
+                        "catIdx": cat_idx,
+                        "routeIdx": route_idx,
+                        "courseIdx": 0,
+                        "category": category,
+                        "route": route,
+                        "course": route,
                     }
                 continue
 
-            for course_idx, course in enumerate(route.get('courses', [])):
+            for course_idx, course in enumerate(route.get("courses", [])):
                 course_candidates = [
-                    course.get('id'),
-                    course.get('name'),
-                    _slugify(course.get('name')),
-                    _extract_url_slug(course.get('url')),
+                    course.get("id"),
+                    course.get("name"),
+                    _slugify(course.get("name")),
+                    _extract_url_slug(course.get("url")),
                     _course_public_id(course),
                 ]
                 if _ref_matches(course_ref, course_idx, course_candidates):
                     return {
-                        'catIdx': cat_idx,
-                        'routeIdx': route_idx,
-                        'courseIdx': course_idx,
-                        'category': category,
-                        'route': route,
-                        'course': course,
+                        "catIdx": cat_idx,
+                        "routeIdx": route_idx,
+                        "courseIdx": course_idx,
+                        "category": category,
+                        "route": route,
+                        "course": course,
                     }
 
     return None
 
 
 def _build_course_detail_payload(match):
-    category = match['category']
-    route = match['route']
-    course = match['course']
+    category = match["category"]
+    route = match["route"]
+    course = match["course"]
 
     return {
-        'catId': category.get('id') or str(match['catIdx']),
-        'routeId': route.get('id') or str(match['routeIdx']),
-        'courseId': _course_public_id(course) or str(match['courseIdx']),
-        'indices': {
-            'catIdx': match['catIdx'],
-            'routeIdx': match['routeIdx'],
-            'courseIdx': match['courseIdx'],
+        "catId": category.get("id") or str(match["catIdx"]),
+        "routeId": route.get("id") or str(match["routeIdx"]),
+        "courseId": _course_public_id(course) or str(match["courseIdx"]),
+        "indices": {
+            "catIdx": match["catIdx"],
+            "routeIdx": match["routeIdx"],
+            "courseIdx": match["courseIdx"],
         },
-        'course': course,
-        'isCourseRoute': bool(route.get('isCourse')),
+        "course": course,
+        "isCourseRoute": bool(route.get("isCourse")),
     }
 
 
@@ -659,11 +665,13 @@ def init_cache():
             cache_meta_json_bytes = meta_bytes
             cache_meta_json_gzip_bytes = _gzip_payload(meta_bytes)
 
-        stats = _normalize_stats(selected_data.get('stats'))
+        stats = _normalize_stats(selected_data.get("stats"))
         print(f"[INFO] Cache seleccionado ({cache_source}): {selected_cache_file}")
-        print(f"\n[OK] Datos cargados: {stats.get('totalCategories', 0)} categorías, "
-              f"{stats.get('totalRoutes', 0)} rutas, {stats.get('totalCourses', 0)} cursos, "
-              f"{stats.get('totalClasses', 0)} clases")
+        print(
+            f"\n[OK] Datos cargados: {stats.get('totalCategories', 0)} categorías, "
+            f"{stats.get('totalRoutes', 0)} rutas, {stats.get('totalCourses', 0)} cursos, "
+            f"{stats.get('totalClasses', 0)} clases"
+        )
 
     print(f"[INFO] Servidor listo en http://{DISPLAY_HOST}:{PORT}\n")
 
@@ -708,24 +716,25 @@ def refresh_cache_if_changed():
 
 class PlatziHandler(SimpleHTTPRequestHandler):
     """Manejador HTTP personalizado."""
+
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
-        '.js': 'application/javascript; charset=utf-8',
-        '.mjs': 'application/javascript; charset=utf-8',
-        '.css': 'text/css; charset=utf-8',
-        '.json': 'application/json; charset=utf-8',
-        '.map': 'application/json; charset=utf-8',
-        '.svg': 'image/svg+xml',
-        '.wasm': 'application/wasm',
+        ".js": "application/javascript; charset=utf-8",
+        ".mjs": "application/javascript; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".map": "application/json; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".wasm": "application/wasm",
     }
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=VIEWER_PATH, **kwargs)
 
     def end_headers(self):
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Cross-Origin-Resource-Policy', 'same-site')
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-site")
         super().end_headers()
 
     def _is_allowed_origin(self, origin):
@@ -733,30 +742,30 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             return False
         try:
             parsed = urlparse(origin)
-            return parsed.scheme in {'http', 'https'} and parsed.hostname in LOOPBACK_HOSTS
+            return parsed.scheme in {"http", "https"} and parsed.hostname in LOOPBACK_HOSTS
         except Exception:
             return False
 
     def _set_cors_headers(self):
-        origin = self.headers.get('Origin')
+        origin = self.headers.get("Origin")
         if self._is_allowed_origin(origin):
-            self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Vary', 'Origin')
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
 
     def _accepts_gzip(self):
-        return 'gzip' in str(self.headers.get('Accept-Encoding', '')).lower()
+        return "gzip" in str(self.headers.get("Accept-Encoding", "")).lower()
 
     def _send_json_bytes(self, status_code, raw_bytes, gzip_bytes=None):
         use_gzip = bool(gzip_bytes) and self._accepts_gzip()
         payload = gzip_bytes if use_gzip else raw_bytes
 
         self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store, max-age=0')
-        self.send_header('Pragma', 'no-cache')
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
         if use_gzip:
-            self.send_header('Content-Encoding', 'gzip')
-        self.send_header('Content-Length', str(len(payload)))
+            self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(payload)))
         self._set_cors_headers()
         self.end_headers()
         self.wfile.write(payload)
@@ -774,11 +783,11 @@ class PlatziHandler(SimpleHTTPRequestHandler):
         if isinstance(error, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
             return True
 
-        winerror = getattr(error, 'winerror', None)
+        winerror = getattr(error, "winerror", None)
         if winerror in {10053, 10054}:
             return True
 
-        err_no = getattr(error, 'errno', None)
+        err_no = getattr(error, "errno", None)
         if err_no in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}:
             return True
 
@@ -790,27 +799,27 @@ class PlatziHandler(SimpleHTTPRequestHandler):
         except OSError as error:
             if not self._is_client_disconnect_error(error):
                 raise
-    
+
     def do_GET(self):
-        if self.path == '/api/health':
+        if self.path == "/api/health":
             ds = get_drive_service()
             ffmpeg_executable = _get_ffmpeg_executable()
             payload = {
-                'status': 'ok',
-                'drive': {
-                    'available': bool(ds),
-                    'error': None if ds else get_drive_service_error(),
+                "status": "ok",
+                "drive": {
+                    "available": bool(ds),
+                    "error": None if ds else get_drive_service_error(),
                 },
-                'ffmpeg': {
-                    'available': bool(ffmpeg_executable),
-                    'path': ffmpeg_executable,
-                }
+                "ffmpeg": {
+                    "available": bool(ffmpeg_executable),
+                    "path": ffmpeg_executable,
+                },
             }
             self._send_json(200, payload)
             return
 
         # API endpoint
-        if self.path == '/api/courses':
+        if self.path == "/api/courses":
             refresh_cache_if_changed()
 
             with cache_lock:
@@ -820,7 +829,7 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             self._send_json_bytes(200, raw_bytes, gzip_bytes)
             return
 
-        if self.path == '/api/bootstrap':
+        if self.path == "/api/bootstrap":
             refresh_cache_if_changed()
 
             with cache_lock:
@@ -830,33 +839,38 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             self._send_json_bytes(200, raw_bytes, gzip_bytes)
             return
 
-        if self.path == '/api/cache-meta':
+        if self.path == "/api/cache-meta":
             refresh_cache_if_changed()
 
             with cache_lock:
-                raw_bytes = cache_meta_json_bytes or _payload_to_bytes({
-                    'cache_file_path': cache_file_path,
-                    'source': cache_source,
-                    'mtime': _format_epoch_to_iso(cache_mtime),
-                    'mtimeEpoch': cache_mtime,
-                    'stats': _normalize_stats((courses_cache or {}).get('stats')),
-                    'payloadBytes': {'full': 0, 'bootstrap': 0},
-                })
+                raw_bytes = cache_meta_json_bytes or _payload_to_bytes(
+                    {
+                        "cache_file_path": cache_file_path,
+                        "source": cache_source,
+                        "mtime": _format_epoch_to_iso(cache_mtime),
+                        "mtimeEpoch": cache_mtime,
+                        "stats": _normalize_stats((courses_cache or {}).get("stats")),
+                        "payloadBytes": {"full": 0, "bootstrap": 0},
+                    }
+                )
                 gzip_bytes = cache_meta_json_gzip_bytes or None
 
             self._send_json_bytes(200, raw_bytes, gzip_bytes)
             return
 
-        if self.path.startswith('/api/course-detail/'):
+        if self.path.startswith("/api/course-detail/"):
             refresh_cache_if_changed()
 
             parsed = urlparse(self.path)
-            parts = [unquote(segment) for segment in parsed.path.split('/') if segment]
+            parts = [unquote(segment) for segment in parsed.path.split("/") if segment]
             if len(parts) != 5:
-                self._send_json(400, {
-                    'error': 'invalid_course_detail_path',
-                    'expected': '/api/course-detail/<catId>/<routeId>/<courseId>',
-                })
+                self._send_json(
+                    400,
+                    {
+                        "error": "invalid_course_detail_path",
+                        "expected": "/api/course-detail/<catId>/<routeId>/<courseId>",
+                    },
+                )
                 return
 
             _, _, cat_ref, route_ref, course_ref = parts
@@ -865,33 +879,36 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
             match = _resolve_course_detail_refs(data, cat_ref, route_ref, course_ref)
             if not match:
-                self._send_json(404, {
-                    'error': 'course_not_found',
-                    'catRef': cat_ref,
-                    'routeRef': route_ref,
-                    'courseRef': course_ref,
-                })
+                self._send_json(
+                    404,
+                    {
+                        "error": "course_not_found",
+                        "catRef": cat_ref,
+                        "routeRef": route_ref,
+                        "courseRef": course_ref,
+                    },
+                )
                 return
 
             payload = _build_course_detail_payload(match)
             self._send_json(200, payload)
             return
-        
+
         # Refrescar caché
-        if self.path == '/api/refresh':
+        if self.path == "/api/refresh":
             if not self._is_local_client():
-                self._send_json(403, {'error': 'forbidden'})
+                self._send_json(403, {"error": "forbidden"})
                 return
 
             threading.Thread(target=init_cache, daemon=True).start()
-            self._send_json(200, {'status': 'refreshing'})
+            self._send_json(200, {"status": "refreshing"})
             return
-        
+
         # Cargar progreso desde JSON
-        if self.path == '/api/progress':
+        if self.path == "/api/progress":
             try:
                 if os.path.exists(PROGRESS_FILE):
-                    with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+                    with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
                 else:
                     data = {}
@@ -902,57 +919,67 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             return
 
         # Self-check: validate cache references are Drive IDs (no local refs)
-        if self.path == '/api/self-check-drive':
+        if self.path == "/api/self-check-drive":
             with cache_lock:
-                data = courses_cache or {'categories': [], 'stats': {}}
+                data = courses_cache or {"categories": [], "stats": {}}
 
             report = analyze_drive_references(data)
             self._send_json(200, report)
             return
-        
+
         # Google Drive file streaming (all files served via Drive API)
-        if self.path.startswith('/api/video-compatible/'):
-            file_id = unquote(self.path[len('/api/video-compatible/'):])
+        if self.path.startswith("/api/video-compatible/"):
+            file_id = unquote(self.path[len("/api/video-compatible/") :])
 
             if not file_id or not DRIVE_ID_RE.match(file_id):
-                self._safe_send_error(400, 'Invalid file ID')
+                self._safe_send_error(400, "Invalid file ID")
                 return
 
             ffmpeg_executable = _get_ffmpeg_executable()
             if not ffmpeg_executable:
-                self._safe_send_error(503, 'ffmpeg_not_available')
+                self._safe_send_error(503, "ffmpeg_not_available")
                 return
 
             ds = get_drive_service()
             if not ds:
                 error_detail = get_drive_service_error()
                 hint = (
-                    'Drive service not available. '
-                    'Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or '
-                    'GOOGLE_SERVICE_ACCOUNT_JSON.'
+                    "Drive service not available. "
+                    "Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or "
+                    "GOOGLE_SERVICE_ACCOUNT_JSON."
                 )
                 if error_detail:
-                    self._safe_send_error(503, f'{hint} Detail: {error_detail}')
+                    self._safe_send_error(503, f"{hint} Detail: {error_detail}")
                 else:
                     self._safe_send_error(503, hint)
                 return
 
             # NOTE: We route through local /drive/files endpoint so auth/token handling remains centralized.
-            source_url = f'http://127.0.0.1:{PORT}/drive/files/{file_id}'
+            source_url = f"http://127.0.0.1:{PORT}/drive/files/{file_id}"
             ffmpeg_cmd = [
                 ffmpeg_executable,
-                '-hide_banner',
-                '-loglevel', 'error',
-                '-fflags', '+genpts+discardcorrupt',
-                '-i', source_url,
-                '-map', '0:v:0',
-                '-map', '0:a?',
-                '-c:v', 'copy',
-                '-c:a', 'aac',
-                '-ar', '48000',
-                '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-                '-f', 'mp4',
-                '-',
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-fflags",
+                "+genpts+discardcorrupt",
+                "-i",
+                source_url,
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-ar",
+                "48000",
+                "-movflags",
+                "+frag_keyframe+empty_moov+default_base_moof",
+                "-f",
+                "mp4",
+                "-",
             ]
 
             process = None
@@ -965,9 +992,9 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 )
 
                 self.send_response(200)
-                self.send_header('Content-Type', 'video/mp4')
-                self.send_header('Cache-Control', 'no-store, max-age=0')
-                self.send_header('Accept-Ranges', 'none')
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Cache-Control", "no-store, max-age=0")
+                self.send_header("Accept-Ranges", "none")
                 self._set_cors_headers()
                 self.end_headers()
 
@@ -987,13 +1014,13 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
                 return_code = process.wait(timeout=2)
                 if return_code != 0:
-                    stderr_output = b''
+                    stderr_output = b""
                     if process.stderr is not None:
                         try:
                             stderr_output = process.stderr.read(4096)
                         except Exception:
-                            stderr_output = b''
-                    stderr_text = stderr_output.decode('utf-8', errors='ignore').strip()
+                            stderr_output = b""
+                    stderr_text = stderr_output.decode("utf-8", errors="ignore").strip()
                     if stderr_text:
                         print(f"[WARN] ffmpeg compatibility stream failed ({file_id}): {stderr_text}")
                     else:
@@ -1010,7 +1037,7 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             except Exception as error:
                 print(f"[ERROR] Compatibility stream failed for {file_id}: {error}")
                 if not self.wfile.closed:
-                    self._safe_send_error(502, 'Failed to stream compatibility video')
+                    self._safe_send_error(502, "Failed to stream compatibility video")
                 return
             finally:
                 if process is not None and process.poll() is None:
@@ -1024,59 +1051,61 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                             pass
             return
 
-        if self.path.startswith('/drive/files/'):
+        if self.path.startswith("/drive/files/"):
             file_id = unquote(self.path[13:])
 
-            if file_id.startswith('local:'):
-                self.send_error(400, 'Local file refs are disabled in Drive mode. Rebuild cache with rebuild_cache_drive.py')
+            if file_id.startswith("local:"):
+                self.send_error(
+                    400, "Local file refs are disabled in Drive mode. Rebuild cache with rebuild_cache_drive.py"
+                )
                 return
-            
+
             if not file_id or not DRIVE_ID_RE.match(file_id):
-                self.send_error(400, 'Invalid file ID')
+                self.send_error(400, "Invalid file ID")
                 return
-            
+
             ds = get_drive_service()
             if not ds:
                 error_detail = get_drive_service_error()
                 hint = (
-                    'Drive service not available. '
-                    'Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or '
-                    'GOOGLE_SERVICE_ACCOUNT_JSON.'
+                    "Drive service not available. "
+                    "Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or "
+                    "GOOGLE_SERVICE_ACCOUNT_JSON."
                 )
                 if error_detail:
-                    self._safe_send_error(503, f'{hint} Detail: {error_detail}')
+                    self._safe_send_error(503, f"{hint} Detail: {error_detail}")
                 else:
                     self._safe_send_error(503, hint)
                 return
-            
+
             try:
-                range_header = self.headers.get('Range')
+                range_header = self.headers.get("Range")
 
                 if range_header:
                     sanitized_range = str(range_header).strip()
-                    if ',' in sanitized_range or not re.match(r'^bytes=\d*-\d*$', sanitized_range):
-                        self._safe_send_error(416, 'Invalid range header')
+                    if "," in sanitized_range or not re.match(r"^bytes=\d*-\d*$", sanitized_range):
+                        self._safe_send_error(416, "Invalid range header")
                         return
                     resp = ds.download_file_range(file_id, range_header=sanitized_range)
                 else:
                     resp = ds.download_file_range(file_id)
 
                 status_code = resp.status_code
-                mime_type = resp.headers.get('Content-Type', 'application/octet-stream')
-                is_video = mime_type.startswith('video')
-                content_range = resp.headers.get('Content-Range')
-                content_length = resp.headers.get('Content-Length')
+                mime_type = resp.headers.get("Content-Type", "application/octet-stream")
+                is_video = mime_type.startswith("video")
+                content_range = resp.headers.get("Content-Range")
+                content_length = resp.headers.get("Content-Length")
 
                 self.send_response(status_code)
-                self.send_header('Content-Type', mime_type)
+                self.send_header("Content-Type", mime_type)
                 if content_range:
-                    self.send_header('Content-Range', content_range)
+                    self.send_header("Content-Range", content_range)
                 if content_length:
-                    self.send_header('Content-Length', content_length)
-                self.send_header('Accept-Ranges', 'bytes')
+                    self.send_header("Content-Length", content_length)
+                self.send_header("Accept-Ranges", "bytes")
                 self._set_cors_headers()
                 if is_video:
-                    self.send_header('Cache-Control', 'public, max-age=3600')
+                    self.send_header("Cache-Control", "public, max-age=3600")
                 self.end_headers()
 
                 start_time = time.time()
@@ -1095,101 +1124,102 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     # Loguear métricas de streaming para detectar cuellos de botella
                     if duration > 0.5:
                         speed = (total_bytes / 1024 / 1024) / duration
-                        print(f"[STREAM] {file_id} | Range: {range_header or 'Full'} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)")
+                        print(
+                            f"[STREAM] {file_id} | Range: {range_header or 'Full'} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)"
+                        )
                     resp.close()
             except Exception as e:
                 if self._is_client_disconnect_error(e):
                     return
 
-                drive_status = getattr(getattr(e, 'response', None), 'status_code', None)
+                drive_status = getattr(getattr(e, "response", None), "status_code", None)
                 if isinstance(drive_status, int):
-                    self._safe_send_error(drive_status, f'Drive error ({drive_status})')
+                    self._safe_send_error(drive_status, f"Drive error ({drive_status})")
                     return
 
                 print(f"[ERROR] Drive streaming error for {file_id}: {e}")
-                self._safe_send_error(502, 'Failed to stream file from Drive')
+                self._safe_send_error(502, "Failed to stream file from Drive")
             return
-        
+
         # Static files (index.html, js/, css, etc.)
         return super().do_GET()
-    
+
     def do_POST(self):
         # Guardar progreso en JSON
-        if self.path == '/api/progress':
-            content_length = int(self.headers.get('Content-Length', 0))
+        if self.path == "/api/progress":
+            content_length = int(self.headers.get("Content-Length", 0))
 
             if content_length <= 0 or content_length > MAX_PROGRESS_BYTES:
-                self._send_json(413, {'error': 'payload_too_large'})
+                self._send_json(413, {"error": "payload_too_large"})
                 return
 
             post_data = self.rfile.read(content_length)
-            
+
             try:
                 # Validar que es JSON válido
-                parsed = json.loads(post_data.decode('utf-8'))
+                parsed = json.loads(post_data.decode("utf-8"))
                 if not isinstance(parsed, dict):
-                    raise ValueError('progress payload must be a JSON object')
-                
+                    raise ValueError("progress payload must be a JSON object")
+
                 # Guardar en archivo
                 progress_dir = os.path.dirname(PROGRESS_FILE)
                 if progress_dir:
                     os.makedirs(progress_dir, exist_ok=True)
-                with open(PROGRESS_FILE, 'wb') as f:
+                with open(PROGRESS_FILE, "wb") as f:
                     f.write(post_data)
 
-                self._send_json(200, {'status': 'saved'})
+                self._send_json(200, {"status": "saved"})
             except Exception as e:
-                self._send_json(400, {'error': str(e)})
+                self._send_json(400, {"error": str(e)})
             return
 
         # Abrir en reproductor externo (VLC)
-        if self.path == '/api/open-external':
+        if self.path == "/api/open-external":
             try:
-                content_length = int(self.headers.get('Content-Length', 0))
+                content_length = int(self.headers.get("Content-Length", 0))
                 post_data = self.rfile.read(content_length)
-                payload = json.loads(post_data.decode('utf-8'))
-                video_url = payload.get('url')
-                
+                payload = json.loads(post_data.decode("utf-8"))
+                video_url = payload.get("url")
+
                 if not video_url:
-                    self._send_json(400, {'error': 'missing_url'})
+                    self._send_json(400, {"error": "missing_url"})
                     return
 
                 # Si es una ruta relativa, agregar localhost
-                if video_url.startswith('/'):
+                if video_url.startswith("/"):
                     video_url = f"http://localhost:{PORT}{video_url}"
-                
+
                 # Buscar VLC en rutas comunes de Windows
                 vlc_path = None
                 possible_paths = [
                     r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-                    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
+                    r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
                 ]
-                
+
                 for path in possible_paths:
                     if os.path.exists(path):
                         vlc_path = path
                         break
-                
+
                 if vlc_path:
                     # subprocess.Popen detaches the process so server keeps running
                     subprocess.Popen([vlc_path, video_url])
-                    self._send_json(200, {'status': 'opened_vlc', 'player': vlc_path})
+                    self._send_json(200, {"status": "opened_vlc", "player": vlc_path})
                 else:
                     # Intentar comando global 'vlc'
                     try:
-                        subprocess.Popen(['vlc', video_url])
-                        self._send_json(200, {'status': 'opened_vlc_cmd'})
+                        subprocess.Popen(["vlc", video_url])
+                        self._send_json(200, {"status": "opened_vlc_cmd"})
                     except FileNotFoundError:
-                        self._send_json(404, {'error': 'vlc_not_found'})
+                        self._send_json(404, {"error": "vlc_not_found"})
 
             except Exception as e:
-                self._send_json(500, {'error': str(e)})
+                self._send_json(500, {"error": str(e)})
             return
-
 
     def do_OPTIONS(self):
         # Manejar CORS preflight
-        origin = self.headers.get('Origin')
+        origin = self.headers.get("Origin")
         if not self._is_allowed_origin(origin):
             self.send_response(403)
             self.end_headers()
@@ -1197,17 +1227,17 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
         self.send_response(200)
         self._set_cors_headers()
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.send_header('Access-Control-Max-Age', '600')
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
-    
+
     def log_message(self, format, *args):
         # Evitar errores cuando args[0] no es un string
         try:
-            msg = str(args[0]) if args else ''
+            msg = str(args[0]) if args else ""
             # No mostrar logs de favicon o api
-            if '/api/' in msg or 'favicon' in msg:
+            if "/api/" in msg or "favicon" in msg:
                 return
             print(f"[{self.log_date_time_string()}] {msg}")
         except Exception:
@@ -1228,10 +1258,10 @@ def main():
     print(f"URL: http://{DISPLAY_HOST}:{PORT}")
     print("=" * 50)
     print()
-    
+
     # Cargar caché ANTES de iniciar el servidor
     server = create_server(BIND_HOST, PORT)
-    
+
     try:
         run_server(server)
     except KeyboardInterrupt:
@@ -1248,5 +1278,5 @@ def run_server(server):
     server.serve_forever()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
