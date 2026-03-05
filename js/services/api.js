@@ -159,6 +159,12 @@ export class ApiService {
         return `${API_URL}/drive/files/${safeRef}`;
     }
 
+    static getCompatibleVideoUrl(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return '';
+        return `${API_URL}/api/video-compatible/${safeRef}`;
+    }
+
     static getFileUrl(fileId) {
         const safeRef = this._normalizeDriveRef(fileId);
         if (!safeRef) return '';

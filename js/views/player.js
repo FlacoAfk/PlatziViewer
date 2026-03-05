@@ -28,6 +28,8 @@ export default class PlayerView {
         this._syncPromptDismissed = false;
         this._syncPromptElement = null;
         this._syncPromptHideTimeout = null;
+        this._isCompatibilityModeActive = false;
+        this._compatibilitySwitchAttempts = 0;
 
         window.__playerView = this;
     }
@@ -91,7 +93,87 @@ export default class PlayerView {
         this._syncPromptVisible = false;
     }
 
-    _showSyncCompatibilityPrompt() {
+    _activateCompatibilityMode() {
+        if (this._isDestroyed || this._isCompatibilityModeActive) return false;
+        if (!this.videoFileRef) return false;
+
+        const video = this._videoEl || document.getElementById('mainVideo');
+        if (!video) return false;
+
+        const compatUrl = ApiService.getCompatibleVideoUrl(this.videoFileRef);
+        if (!compatUrl) return false;
+
+        const sourceTag = video.querySelector('source');
+        const previousTime = video.currentTime || 0;
+        const wasPaused = video.paused;
+        const fallbackUrl = video.currentSrc || video.src || this.videoUrl;
+
+        this._compatibilitySwitchAttempts += 1;
+        this._isCompatibilityModeActive = true;
+        this._syncIssueResyncHits = 0;
+        this._syncIssueWindowStartMs = Date.now();
+
+        const onCompatError = () => {
+            this._isCompatibilityModeActive = false;
+
+            if (!this._isDestroyed && fallbackUrl) {
+                try {
+                    if (sourceTag) sourceTag.src = fallbackUrl;
+                    video.src = fallbackUrl;
+                    video.load();
+                    if (!wasPaused) {
+                        if (this._playWhenReady) {
+                            this._playWhenReady();
+                        } else {
+                            video.play().catch(() => { });
+                        }
+                    }
+                } catch (e) {
+                    // no-op
+                }
+            }
+
+            this._showSyncCompatibilityPrompt(true);
+        };
+
+        video.addEventListener('error', onCompatError, { once: true });
+
+        try {
+            video.pause();
+            if (sourceTag) sourceTag.src = compatUrl;
+            video.src = compatUrl;
+            video.load();
+
+            video.addEventListener('loadedmetadata', () => {
+                video.removeEventListener('error', onCompatError);
+
+                if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < (video.duration || Infinity)) {
+                    video.currentTime = previousTime;
+                }
+
+                if (!wasPaused) {
+                    if (this._playWhenReady) {
+                        this._playWhenReady();
+                    } else {
+                        video.play().catch(() => { });
+                    }
+                }
+            }, { once: true });
+
+            console.log('[COMPAT] Activated FFmpeg compatibility stream for current class');
+            return true;
+        } catch (e) {
+            this._isCompatibilityModeActive = false;
+            try {
+                video.removeEventListener('error', onCompatError);
+            } catch (_) {
+                // no-op
+            }
+            return false;
+        }
+    }
+
+    _showSyncCompatibilityPrompt(forceVlcOnly = false) {
         if (this._isDestroyed || this._syncPromptDismissed || this._syncPromptVisible) return;
 
         const container = document.getElementById('videoContainer');
@@ -119,12 +201,34 @@ export default class PlayerView {
         const text = document.createElement('div');
         text.style.fontSize = '0.82rem';
         text.style.lineHeight = '1.3';
-        text.textContent = 'Este video parece tener timestamps inestables. VLC suele reproducirlo mejor.';
+        text.textContent = forceVlcOnly
+            ? 'Este video sigue inestable incluso en modo compatibilidad. VLC suele reproducirlo mejor.'
+            : 'Este video parece tener timestamps inestables. Puedes probar modo compatibilidad (FFmpeg) o VLC.';
 
         const actions = document.createElement('div');
         actions.style.display = 'flex';
         actions.style.gap = '8px';
         actions.style.flexShrink = '0';
+
+        if (!forceVlcOnly && !this._isCompatibilityModeActive) {
+            const compatBtn = document.createElement('button');
+            compatBtn.type = 'button';
+            compatBtn.textContent = 'Modo compat.';
+            compatBtn.style.border = '1px solid rgba(0,180,216,.5)';
+            compatBtn.style.background = 'rgba(0,180,216,.18)';
+            compatBtn.style.color = '#9feeff';
+            compatBtn.style.borderRadius = '8px';
+            compatBtn.style.padding = '6px 10px';
+            compatBtn.style.cursor = 'pointer';
+            compatBtn.onclick = () => {
+                const switched = this._activateCompatibilityMode();
+                this._hideSyncCompatibilityPrompt();
+                if (!switched) {
+                    this.openInExternalPlayer();
+                }
+            };
+            actions.appendChild(compatBtn);
+        }
 
         const openBtn = document.createElement('button');
         openBtn.type = 'button';
@@ -196,6 +300,12 @@ export default class PlayerView {
         this._syncIssueResyncHits += 1;
 
         if (this._syncIssueResyncHits >= 3) {
+            if (!this._isCompatibilityModeActive && this._activateCompatibilityMode()) {
+                this._syncIssueResyncHits = 0;
+                this._syncIssueWindowStartMs = now;
+                return;
+            }
+
             if (this._isAutoExternalEnabledForSync()) {
                 this.openInExternalPlayer();
             } else {
@@ -1312,6 +1422,8 @@ export default class PlayerView {
         this._loadSyncPromptPreferenceForCurrentClass();
         this._syncIssueResyncHits = 0;
         this._syncIssueWindowStartMs = 0;
+        this._isCompatibilityModeActive = false;
+        this._compatibilitySwitchAttempts = 0;
         const video = document.getElementById('mainVideo');
         this._videoEl = video || null;
         if (video) {

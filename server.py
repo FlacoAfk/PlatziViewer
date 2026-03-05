@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlparse
 import threading
 import time
 import subprocess
+import shutil
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIEWER_PATH = os.environ.get('PLATZI_VIEWER_PATH', BASE_DIR)
 DATA_PATH = os.environ.get('PLATZI_DATA_PATH', VIEWER_PATH)
@@ -54,7 +55,60 @@ cache_meta_json_gzip_bytes = b''
 # Google Drive service (lazy loaded)
 _drive_service = None
 _drive_service_error = None
+_ffmpeg_executable = None
+_ffmpeg_checked = False
 DRIVE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{10,}$')
+
+
+def _get_ffmpeg_executable():
+    global _ffmpeg_executable, _ffmpeg_checked
+
+    if _ffmpeg_checked:
+        return _ffmpeg_executable
+
+    candidates = []
+    env_path = os.environ.get('FFMPEG_PATH', '').strip()
+    if env_path:
+        candidates.append(env_path)
+
+    which_ffmpeg = shutil.which('ffmpeg')
+    if which_ffmpeg:
+        candidates.append(which_ffmpeg)
+
+    if os.name == 'nt':
+        candidates.extend([
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+        ])
+
+    seen = set()
+    unique_candidates = []
+    for item in candidates:
+        if not item:
+            continue
+        normalized = os.path.abspath(item)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(normalized)
+
+    for candidate in unique_candidates:
+        try:
+            completed = subprocess.run(
+                [candidate, '-version'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+                check=False,
+            )
+            if completed.returncode == 0:
+                _ffmpeg_executable = candidate
+                break
+        except Exception:
+            continue
+
+    _ffmpeg_checked = True
+    return _ffmpeg_executable
 
 
 def analyze_drive_references(data):
@@ -740,11 +794,16 @@ class PlatziHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/api/health':
             ds = get_drive_service()
+            ffmpeg_executable = _get_ffmpeg_executable()
             payload = {
                 'status': 'ok',
                 'drive': {
                     'available': bool(ds),
                     'error': None if ds else get_drive_service_error(),
+                },
+                'ffmpeg': {
+                    'available': bool(ffmpeg_executable),
+                    'path': ffmpeg_executable,
                 }
             }
             self._send_json(200, payload)
@@ -852,6 +911,119 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             return
         
         # Google Drive file streaming (all files served via Drive API)
+        if self.path.startswith('/api/video-compatible/'):
+            file_id = unquote(self.path[len('/api/video-compatible/'):])
+
+            if not file_id or not DRIVE_ID_RE.match(file_id):
+                self._safe_send_error(400, 'Invalid file ID')
+                return
+
+            ffmpeg_executable = _get_ffmpeg_executable()
+            if not ffmpeg_executable:
+                self._safe_send_error(503, 'ffmpeg_not_available')
+                return
+
+            ds = get_drive_service()
+            if not ds:
+                error_detail = get_drive_service_error()
+                hint = (
+                    'Drive service not available. '
+                    'Check service_account.json, GOOGLE_SERVICE_ACCOUNT_FILE or '
+                    'GOOGLE_SERVICE_ACCOUNT_JSON.'
+                )
+                if error_detail:
+                    self._safe_send_error(503, f'{hint} Detail: {error_detail}')
+                else:
+                    self._safe_send_error(503, hint)
+                return
+
+            # NOTE: We route through local /drive/files endpoint so auth/token handling remains centralized.
+            source_url = f'http://127.0.0.1:{PORT}/drive/files/{file_id}'
+            ffmpeg_cmd = [
+                ffmpeg_executable,
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-fflags', '+genpts+discardcorrupt',
+                '-i', source_url,
+                '-map', '0:v:0',
+                '-map', '0:a?',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-ar', '48000',
+                '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+                '-f', 'mp4',
+                '-',
+            ]
+
+            process = None
+            try:
+                process = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/mp4')
+                self.send_header('Cache-Control', 'no-store, max-age=0')
+                self.send_header('Accept-Ranges', 'none')
+                self._set_cors_headers()
+                self.end_headers()
+
+                total_bytes = 0
+                start_time = time.time()
+
+                while True:
+                    if process.stdout is None:
+                        break
+
+                    chunk = process.stdout.read(1024 * 512)
+                    if not chunk:
+                        break
+
+                    self.wfile.write(chunk)
+                    total_bytes += len(chunk)
+
+                return_code = process.wait(timeout=2)
+                if return_code != 0:
+                    stderr_output = b''
+                    if process.stderr is not None:
+                        try:
+                            stderr_output = process.stderr.read(4096)
+                        except Exception:
+                            stderr_output = b''
+                    stderr_text = stderr_output.decode('utf-8', errors='ignore').strip()
+                    if stderr_text:
+                        print(f"[WARN] ffmpeg compatibility stream failed ({file_id}): {stderr_text}")
+                    else:
+                        print(f"[WARN] ffmpeg compatibility stream failed ({file_id}) with code {return_code}")
+                else:
+                    duration = max(0.001, time.time() - start_time)
+                    speed = (total_bytes / 1024 / 1024) / duration
+                    print(f"[COMPAT] {file_id} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)")
+
+            except OSError as error:
+                if not self._is_client_disconnect_error(error):
+                    print(f"[ERROR] Compatibility stream write error for {file_id}: {error}")
+                return
+            except Exception as error:
+                print(f"[ERROR] Compatibility stream failed for {file_id}: {error}")
+                if not self.wfile.closed:
+                    self._safe_send_error(502, 'Failed to stream compatibility video')
+                return
+            finally:
+                if process is not None and process.poll() is None:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=1)
+                    except Exception:
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
+            return
+
         if self.path.startswith('/drive/files/'):
             file_id = unquote(self.path[13:])
 
