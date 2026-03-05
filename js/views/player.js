@@ -22,8 +22,188 @@ export default class PlayerView {
         this._startPlaybackTimeout = null;
         this._startPlaybackCanPlayHandler = null;
         this._videoFrameCallbackId = null;
+        this._syncIssueResyncHits = 0;
+        this._syncIssueWindowStartMs = 0;
+        this._syncPromptVisible = false;
+        this._syncPromptDismissed = false;
+        this._syncPromptElement = null;
+        this._syncPromptHideTimeout = null;
 
         window.__playerView = this;
+    }
+
+    _getSyncPromptDismissKey() {
+        if (!this.classKey) return null;
+        return `platzi_sync_prompt_dismiss_${encodeURIComponent(this.classKey)}`;
+    }
+
+    _getSyncAutoExternalKey() {
+        return 'platzi_sync_auto_external_player';
+    }
+
+    _isAutoExternalEnabledForSync() {
+        try {
+            return localStorage.getItem(this._getSyncAutoExternalKey()) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _setAutoExternalEnabledForSync(enabled) {
+        try {
+            localStorage.setItem(this._getSyncAutoExternalKey(), enabled ? '1' : '0');
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    _dismissSyncPromptForCurrentClass() {
+        this._syncPromptDismissed = true;
+        const key = this._getSyncPromptDismissKey();
+        if (!key) return;
+        try {
+            localStorage.setItem(key, '1');
+        } catch (e) {
+            // no-op
+        }
+    }
+
+    _loadSyncPromptPreferenceForCurrentClass() {
+        this._syncPromptDismissed = false;
+        const key = this._getSyncPromptDismissKey();
+        if (!key) return;
+        try {
+            this._syncPromptDismissed = localStorage.getItem(key) === '1';
+        } catch (e) {
+            this._syncPromptDismissed = false;
+        }
+    }
+
+    _hideSyncCompatibilityPrompt() {
+        if (this._syncPromptHideTimeout) {
+            window.clearTimeout(this._syncPromptHideTimeout);
+            this._syncPromptHideTimeout = null;
+        }
+        if (this._syncPromptElement) {
+            this._syncPromptElement.remove();
+            this._syncPromptElement = null;
+        }
+        this._syncPromptVisible = false;
+    }
+
+    _showSyncCompatibilityPrompt() {
+        if (this._isDestroyed || this._syncPromptDismissed || this._syncPromptVisible) return;
+
+        const container = document.getElementById('videoContainer');
+        if (!container) return;
+
+        this._hideSyncCompatibilityPrompt();
+
+        const prompt = document.createElement('div');
+        prompt.style.position = 'absolute';
+        prompt.style.left = '12px';
+        prompt.style.right = '12px';
+        prompt.style.bottom = '70px';
+        prompt.style.zIndex = '35';
+        prompt.style.display = 'flex';
+        prompt.style.alignItems = 'center';
+        prompt.style.justifyContent = 'space-between';
+        prompt.style.gap = '10px';
+        prompt.style.padding = '10px 12px';
+        prompt.style.borderRadius = '10px';
+        prompt.style.background = 'rgba(0, 0, 0, 0.78)';
+        prompt.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        prompt.style.color = '#fff';
+        prompt.style.backdropFilter = 'blur(4px)';
+
+        const text = document.createElement('div');
+        text.style.fontSize = '0.82rem';
+        text.style.lineHeight = '1.3';
+        text.textContent = 'Este video parece tener timestamps inestables. VLC suele reproducirlo mejor.';
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '8px';
+        actions.style.flexShrink = '0';
+
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.textContent = 'Abrir VLC';
+        openBtn.style.border = '1px solid rgba(0,214,143,.5)';
+        openBtn.style.background = 'rgba(0,214,143,.18)';
+        openBtn.style.color = '#9fffdc';
+        openBtn.style.borderRadius = '8px';
+        openBtn.style.padding = '6px 10px';
+        openBtn.style.cursor = 'pointer';
+        openBtn.onclick = () => {
+            this.openInExternalPlayer();
+            this._hideSyncCompatibilityPrompt();
+        };
+
+        const alwaysBtn = document.createElement('button');
+        alwaysBtn.type = 'button';
+        alwaysBtn.textContent = 'Siempre';
+        alwaysBtn.style.border = '1px solid rgba(255,255,255,.25)';
+        alwaysBtn.style.background = 'rgba(255,255,255,.1)';
+        alwaysBtn.style.color = '#fff';
+        alwaysBtn.style.borderRadius = '8px';
+        alwaysBtn.style.padding = '6px 10px';
+        alwaysBtn.style.cursor = 'pointer';
+        alwaysBtn.onclick = () => {
+            this._setAutoExternalEnabledForSync(true);
+            this.openInExternalPlayer();
+            this._hideSyncCompatibilityPrompt();
+        };
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.textContent = '×';
+        closeBtn.style.border = 'none';
+        closeBtn.style.background = 'transparent';
+        closeBtn.style.color = '#fff';
+        closeBtn.style.fontSize = '1rem';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.padding = '0 4px';
+        closeBtn.onclick = () => {
+            this._dismissSyncPromptForCurrentClass();
+            this._hideSyncCompatibilityPrompt();
+        };
+
+        actions.appendChild(openBtn);
+        actions.appendChild(alwaysBtn);
+        actions.appendChild(closeBtn);
+
+        prompt.appendChild(text);
+        prompt.appendChild(actions);
+
+        container.appendChild(prompt);
+        this._syncPromptElement = prompt;
+        this._syncPromptVisible = true;
+        this._syncPromptHideTimeout = window.setTimeout(() => {
+            this._hideSyncCompatibilityPrompt();
+        }, 12000);
+    }
+
+    _registerHardResyncEvent() {
+        if (this._isDestroyed) return;
+
+        const now = Date.now();
+        if (!this._syncIssueWindowStartMs || now - this._syncIssueWindowStartMs > 120000) {
+            this._syncIssueWindowStartMs = now;
+            this._syncIssueResyncHits = 0;
+        }
+
+        this._syncIssueResyncHits += 1;
+
+        if (this._syncIssueResyncHits >= 3) {
+            if (this._isAutoExternalEnabledForSync()) {
+                this.openInExternalPlayer();
+            } else {
+                this._showSyncCompatibilityPrompt();
+            }
+            this._syncIssueResyncHits = 0;
+            this._syncIssueWindowStartMs = now;
+        }
     }
 
     _isTouchDevice() {
@@ -753,6 +933,7 @@ export default class PlayerView {
 
             if (video.paused || video.seeking) return;
 
+            this._registerHardResyncEvent();
             const targetTime = Math.max(0, (video.currentTime || 0) - 0.08);
             seekToTime(targetTime);
         };
@@ -1128,6 +1309,9 @@ export default class PlayerView {
 
     mounted() {
         this._isDestroyed = false;
+        this._loadSyncPromptPreferenceForCurrentClass();
+        this._syncIssueResyncHits = 0;
+        this._syncIssueWindowStartMs = 0;
         const video = document.getElementById('mainVideo');
         this._videoEl = video || null;
         if (video) {
@@ -1265,6 +1449,7 @@ export default class PlayerView {
 
     destroy() {
         this._isDestroyed = true;
+        this._hideSyncCompatibilityPrompt();
 
         if (this._startPlaybackTimeout) {
             window.clearTimeout(this._startPlaybackTimeout);
