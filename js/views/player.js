@@ -30,6 +30,9 @@ export default class PlayerView {
         this._syncPromptHideTimeout = null;
         this._isCompatibilityModeActive = false;
         this._compatibilitySwitchAttempts = 0;
+        this._avSyncStats = null;
+        this._lastCompatHealthSnapshot = null;
+        this._compatHealthFetchInFlight = null;
 
         window.__playerView = this;
     }
@@ -93,9 +96,54 @@ export default class PlayerView {
         this._syncPromptVisible = false;
     }
 
+    _buildCompatibilityPromptMessage(forceVlcOnly = false) {
+        const baseText = forceVlcOnly
+            ? 'Este video sigue inestable incluso en modo compatibilidad. VLC suele reproducirlo mejor.'
+            : 'Este video parece tener timestamps inestables. Puedes probar modo compatibilidad (FFmpeg) o VLC.';
+
+        const snapshot = this._lastCompatHealthSnapshot;
+        if (!snapshot) return baseText;
+
+        const modeLabel = snapshot.lastMode ? `modo ${snapshot.lastMode}` : 'modo desconocido';
+        const speedLabel = Number.isFinite(snapshot.lastSpeedMBps) ? `${snapshot.lastSpeedMBps.toFixed(2)} MB/s` : 'velocidad n/d';
+        return `${baseText} Diagnóstico backend: ${modeLabel}, ${speedLabel}.`;
+    }
+
+    async _captureCompatibilityHealth(reason = 'sync_event') {
+        if (this._isDestroyed) return null;
+        if (this._compatHealthFetchInFlight) return this._compatHealthFetchInFlight;
+
+        this._compatHealthFetchInFlight = ApiService.getHealth()
+            .then((payload) => {
+                const snapshot = {
+                    reason,
+                    capturedAt: Date.now(),
+                    ffmpegAvailable: !!payload?.ffmpeg?.available,
+                    lastMode: payload?.compatStream?.lastMode || null,
+                    lastError: payload?.compatStream?.lastError || null,
+                    lastDurationSec: payload?.compatStream?.lastDurationSec,
+                    lastSpeedMBps: payload?.compatStream?.lastSpeedMBps,
+                    successfulStreams: payload?.compatStream?.successfulStreams,
+                    failedStreams: payload?.compatStream?.failedStreams,
+                };
+
+                this._lastCompatHealthSnapshot = snapshot;
+                if (this._avSyncStats) this._avSyncStats.lastCompatHealth = snapshot;
+                return snapshot;
+            })
+            .catch(() => null)
+            .finally(() => {
+                this._compatHealthFetchInFlight = null;
+            });
+
+        return this._compatHealthFetchInFlight;
+    }
+
     _activateCompatibilityMode() {
         if (this._isDestroyed || this._isCompatibilityModeActive) return false;
         if (!this.videoFileRef) return false;
+
+        this._captureCompatibilityHealth('compat_activate_attempt').catch(() => null);
 
         const video = this._videoEl || document.getElementById('mainVideo');
         if (!video) return false;
@@ -109,12 +157,14 @@ export default class PlayerView {
         const fallbackUrl = video.currentSrc || video.src || this.videoUrl;
 
         this._compatibilitySwitchAttempts += 1;
+        if (this._avSyncStats) this._avSyncStats.compatibilityActivations = this._compatibilitySwitchAttempts;
         this._isCompatibilityModeActive = true;
         this._syncIssueResyncHits = 0;
         this._syncIssueWindowStartMs = Date.now();
 
         const onCompatError = () => {
             this._isCompatibilityModeActive = false;
+            this._captureCompatibilityHealth('compat_activate_error').catch(() => null);
 
             if (!this._isDestroyed && fallbackUrl) {
                 try {
@@ -161,6 +211,7 @@ export default class PlayerView {
             }, { once: true });
 
             console.log('[COMPAT] Activated FFmpeg compatibility stream for current class');
+            this._captureCompatibilityHealth('compat_activate_success').catch(() => null);
             return true;
         } catch (e) {
             this._isCompatibilityModeActive = false;
@@ -201,9 +252,12 @@ export default class PlayerView {
         const text = document.createElement('div');
         text.style.fontSize = '0.82rem';
         text.style.lineHeight = '1.3';
-        text.textContent = forceVlcOnly
-            ? 'Este video sigue inestable incluso en modo compatibilidad. VLC suele reproducirlo mejor.'
-            : 'Este video parece tener timestamps inestables. Puedes probar modo compatibilidad (FFmpeg) o VLC.';
+        text.textContent = this._buildCompatibilityPromptMessage(forceVlcOnly);
+
+        this._captureCompatibilityHealth('sync_prompt').then(() => {
+            if (this._isDestroyed || !this._syncPromptVisible || !this._syncPromptElement?.contains(text)) return;
+            text.textContent = this._buildCompatibilityPromptMessage(forceVlcOnly);
+        }).catch(() => null);
 
         const actions = document.createElement('div');
         actions.style.display = 'flex';
@@ -290,6 +344,11 @@ export default class PlayerView {
 
     _registerHardResyncEvent() {
         if (this._isDestroyed) return;
+
+        if (this._avSyncStats) {
+            this._avSyncStats.hardResyncEvents += 1;
+            this._avSyncStats.lastHardResyncAt = Date.now();
+        }
 
         const now = Date.now();
         if (!this._syncIssueWindowStartMs || now - this._syncIssueWindowStartMs > 120000) {
@@ -989,6 +1048,36 @@ export default class PlayerView {
         let qualitySources = [];
         let applyQuality = null;
         let autoDownshiftQuality = null;
+        let lastQualitySwitchMs = 0;
+        let driftStreak = 0;
+        let severeDriftStreak = 0;
+        let lastDriftSampleMs = 0;
+        let lastSoftResyncMs = 0;
+
+        const DRIFT_SOFT_THRESHOLD_SECONDS = 0.28;
+        const DRIFT_HARD_THRESHOLD_SECONDS = 0.42;
+        const MIN_DRIFT_SAMPLES_FOR_SOFT = 4;
+        const MIN_DRIFT_SAMPLES_FOR_HARD = 6;
+        const SOFT_RESYNC_COOLDOWN_MS = 9000;
+        const HARD_RESYNC_COOLDOWN_MS = 12000;
+        const QUALITY_SWITCH_MIN_INTERVAL_MS = 7000;
+
+        this._avSyncStats = {
+            startedAt: Date.now(),
+            hardResyncEvents: 0,
+            softResyncEvents: 0,
+            frameDriftSoftHits: 0,
+            frameDriftHardHits: 0,
+            autoQualityDownshifts: 0,
+            qualitySwitches: 0,
+            compatibilityActivations: this._compatibilitySwitchAttempts || 0,
+            lastHardResyncAt: 0,
+            lastSoftResyncAt: 0,
+        };
+
+        const updateSpeedOverrideState = () => {
+            manualSpeedOverride = Math.abs(video.playbackRate - 1) > 0.001;
+        };
 
         // Format time
         const fmt = (s) => {
@@ -1038,7 +1127,7 @@ export default class PlayerView {
 
         const hardResync = () => {
             const now = Date.now();
-            if (now - lastHardResyncMs < 7000) return;
+            if (now - lastHardResyncMs < HARD_RESYNC_COOLDOWN_MS) return;
             lastHardResyncMs = now;
 
             if (video.paused || video.seeking) return;
@@ -1046,6 +1135,23 @@ export default class PlayerView {
             this._registerHardResyncEvent();
             const targetTime = Math.max(0, (video.currentTime || 0) - 0.08);
             seekToTime(targetTime);
+        };
+
+        const softResync = () => {
+            const now = Date.now();
+            if (now - lastSoftResyncMs < SOFT_RESYNC_COOLDOWN_MS) return;
+            if (video.paused || video.seeking) return;
+
+            const bufferAhead = getBufferAhead();
+            if (bufferAhead < 0.3) return;
+
+            lastSoftResyncMs = now;
+            if (this._avSyncStats) {
+                this._avSyncStats.softResyncEvents += 1;
+                this._avSyncStats.lastSoftResyncAt = now;
+            }
+
+            seekToTime(Math.max(0, (video.currentTime || 0) - 0.03));
         };
 
         this._playWhenReady = playWhenReady;
@@ -1159,9 +1265,9 @@ export default class PlayerView {
 
         // Speed
         speedBtn.addEventListener('click', () => {
-            manualSpeedOverride = true;
             currentSpeedIdx = (currentSpeedIdx + 1) % speeds.length;
             video.playbackRate = speeds[currentSpeedIdx];
+            updateSpeedOverrideState();
             speedBtn.textContent = speeds[currentSpeedIdx] + 'x';
         });
 
@@ -1197,6 +1303,14 @@ export default class PlayerView {
             applyQuality = (url, label, mode) => {
                 if (!url) return;
 
+                const currentSource = sourceTag?.src || video.currentSrc || video.src;
+                if (urlsMatch(currentSource, url)) return;
+
+                const now = Date.now();
+                const isAutoMode = mode === 'auto';
+                if (isAutoMode && now - lastQualitySwitchMs < QUALITY_SWITCH_MIN_INTERVAL_MS) return;
+                lastQualitySwitchMs = now;
+
                 const previousTime = video.currentTime || 0;
                 const wasPaused = video.paused;
 
@@ -1221,6 +1335,9 @@ export default class PlayerView {
                 qualityBtn.textContent = mode === 'auto' ? `Auto (${label})` : label;
                 setActiveQualityOption(mode, label);
                 qualityWrap.classList.remove('open');
+                if (this._avSyncStats) {
+                    this._avSyncStats.qualitySwitches += 1;
+                }
             };
 
             const getCurrentQualityIndex = () => {
@@ -1334,10 +1451,13 @@ export default class PlayerView {
                     lastQualityDownshiftMs = now;
                     dropSpikeStreak = 0;
                     severeDropStreak = 0;
+                    if (this._avSyncStats) {
+                        this._avSyncStats.autoQualityDownshifts += 1;
+                    }
                     return;
                 }
 
-                hardResync();
+                softResync();
                 severeDropStreak = 0;
                 return;
             }
@@ -1348,18 +1468,50 @@ export default class PlayerView {
             if (now - lastAutoResyncMs < 8000) return;
             lastAutoResyncMs = now;
             dropSpikeStreak = 0;
-            seekToTime(Math.max(0, video.currentTime - 0.05));
+            softResync();
         }, 3000);
 
         if (typeof video.requestVideoFrameCallback === 'function') {
             const frameSyncLoop = (_timestamp, metadata) => {
                 if (this._isDestroyed) return;
 
+                updateSpeedOverrideState();
+
+                const now = Date.now();
+                if (now - lastDriftSampleMs < 700) {
+                    this._videoFrameCallbackId = video.requestVideoFrameCallback(frameSyncLoop);
+                    return;
+                }
+                lastDriftSampleMs = now;
+
                 if (!video.paused && !video.seeking && !manualSpeedOverride && Number.isFinite(metadata?.mediaTime)) {
                     const driftSeconds = Math.abs((video.currentTime || 0) - metadata.mediaTime);
-                    if (driftSeconds > 0.2) {
-                        hardResync();
+
+                    if (driftSeconds >= DRIFT_SOFT_THRESHOLD_SECONDS) {
+                        driftStreak += 1;
+                        if (this._avSyncStats) this._avSyncStats.frameDriftSoftHits += 1;
+                    } else {
+                        driftStreak = 0;
                     }
+
+                    if (driftSeconds >= DRIFT_HARD_THRESHOLD_SECONDS) {
+                        severeDriftStreak += 1;
+                        if (this._avSyncStats) this._avSyncStats.frameDriftHardHits += 1;
+                    } else {
+                        severeDriftStreak = 0;
+                    }
+
+                    if (severeDriftStreak >= MIN_DRIFT_SAMPLES_FOR_HARD) {
+                        hardResync();
+                        severeDriftStreak = 0;
+                        driftStreak = 0;
+                    } else if (driftStreak >= MIN_DRIFT_SAMPLES_FOR_SOFT) {
+                        softResync();
+                        driftStreak = 0;
+                    }
+                } else {
+                    driftStreak = 0;
+                    severeDriftStreak = 0;
                 }
 
                 this._videoFrameCallbackId = video.requestVideoFrameCallback(frameSyncLoop);
@@ -1424,6 +1576,9 @@ export default class PlayerView {
         this._syncIssueWindowStartMs = 0;
         this._isCompatibilityModeActive = false;
         this._compatibilitySwitchAttempts = 0;
+        this._avSyncStats = null;
+        this._lastCompatHealthSnapshot = null;
+        this._compatHealthFetchInFlight = null;
         const video = document.getElementById('mainVideo');
         this._videoEl = video || null;
         if (video) {
@@ -1563,6 +1718,26 @@ export default class PlayerView {
         this._isDestroyed = true;
         this._hideSyncCompatibilityPrompt();
 
+        if (this._avSyncStats) {
+            const elapsedSec = Math.max(1, Math.round((Date.now() - this._avSyncStats.startedAt) / 1000));
+            console.log('[A/V SYNC]', {
+                elapsedSec,
+                hardResyncEvents: this._avSyncStats.hardResyncEvents,
+                softResyncEvents: this._avSyncStats.softResyncEvents,
+                frameDriftSoftHits: this._avSyncStats.frameDriftSoftHits,
+                frameDriftHardHits: this._avSyncStats.frameDriftHardHits,
+                autoQualityDownshifts: this._avSyncStats.autoQualityDownshifts,
+                qualitySwitches: this._avSyncStats.qualitySwitches,
+                compatibilityActivations: this._avSyncStats.compatibilityActivations,
+                lastCompatHealth: this._lastCompatHealthSnapshot,
+            });
+            window.__platziAvSyncLastStats = {
+                ...this._avSyncStats,
+                elapsedSec,
+                lastCompatHealth: this._lastCompatHealthSnapshot,
+            };
+        }
+
         if (this._startPlaybackTimeout) {
             window.clearTimeout(this._startPlaybackTimeout);
             this._startPlaybackTimeout = null;
@@ -1591,6 +1766,9 @@ export default class PlayerView {
         }
         this._videoFrameCallbackId = null;
         this._videoEl = null;
+        this._avSyncStats = null;
+        this._lastCompatHealthSnapshot = null;
+        this._compatHealthFetchInFlight = null;
         window.__playerView = null;
     }
 }

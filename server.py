@@ -59,6 +59,19 @@ _drive_service_error = None
 _ffmpeg_executable = None
 _ffmpeg_checked = False
 DRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
+compat_stream_lock = threading.Lock()
+compat_stream_stats = {
+    "totalRequests": 0,
+    "successfulStreams": 0,
+    "failedStreams": 0,
+    "totalBytes": 0,
+    "lastFileId": None,
+    "lastError": None,
+    "lastDurationSec": None,
+    "lastSpeedMBps": None,
+    "lastMode": None,
+    "lastAt": None,
+}
 
 
 def _get_ffmpeg_executable():
@@ -804,6 +817,8 @@ class PlatziHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/health":
             ds = get_drive_service()
             ffmpeg_executable = _get_ffmpeg_executable()
+            with compat_stream_lock:
+                compat_snapshot = dict(compat_stream_stats)
             payload = {
                 "status": "ok",
                 "drive": {
@@ -814,6 +829,7 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     "available": bool(ffmpeg_executable),
                     "path": ffmpeg_executable,
                 },
+                "compatStream": compat_snapshot,
             }
             self._send_json(200, payload)
             return
@@ -931,6 +947,11 @@ class PlatziHandler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/video-compatible/"):
             file_id = unquote(self.path[len("/api/video-compatible/") :])
 
+            with compat_stream_lock:
+                compat_stream_stats["totalRequests"] += 1
+                compat_stream_stats["lastFileId"] = file_id
+                compat_stream_stats["lastAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
             if not file_id or not DRIVE_ID_RE.match(file_id):
                 self._safe_send_error(400, "Invalid file ID")
                 return
@@ -956,6 +977,8 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
             # NOTE: We route through local /drive/files endpoint so auth/token handling remains centralized.
             source_url = f"http://127.0.0.1:{PORT}/drive/files/{file_id}"
+            compat_force_reencode = os.environ.get("PLATZI_COMPAT_FORCE_REENCODE", "0").strip() == "1"
+
             ffmpeg_cmd = [
                 ffmpeg_executable,
                 "-hide_banner",
@@ -963,24 +986,51 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 "error",
                 "-fflags",
                 "+genpts+discardcorrupt",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-max_interleave_delta",
+                "0",
                 "-i",
                 source_url,
                 "-map",
                 "0:v:0",
                 "-map",
                 "0:a?",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-ar",
-                "48000",
-                "-movflags",
-                "+frag_keyframe+empty_moov+default_base_moof",
-                "-f",
-                "mp4",
-                "-",
             ]
+
+            if compat_force_reencode:
+                ffmpeg_cmd.extend(
+                    [
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "veryfast",
+                        "-pix_fmt",
+                        "yuv420p",
+                    ]
+                )
+            else:
+                ffmpeg_cmd.extend(["-c:v", "copy"])
+
+            ffmpeg_cmd.extend(
+                [
+                    "-c:a",
+                    "aac",
+                    "-ar",
+                    "48000",
+                    "-af",
+                    "aresample=async=1:first_pts=0",
+                    "-movflags",
+                    "+frag_keyframe+empty_moov+default_base_moof",
+                    "-muxdelay",
+                    "0",
+                    "-muxpreload",
+                    "0",
+                    "-f",
+                    "mp4",
+                    "-",
+                ]
+            )
 
             process = None
             try:
@@ -1014,6 +1064,9 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
                 return_code = process.wait(timeout=2)
                 if return_code != 0:
+                    with compat_stream_lock:
+                        compat_stream_stats["failedStreams"] += 1
+                        compat_stream_stats["lastMode"] = "reencode" if compat_force_reencode else "copy"
                     stderr_output = b""
                     if process.stderr is not None:
                         try:
@@ -1022,19 +1075,36 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                             stderr_output = b""
                     stderr_text = stderr_output.decode("utf-8", errors="ignore").strip()
                     if stderr_text:
+                        with compat_stream_lock:
+                            compat_stream_stats["lastError"] = stderr_text[:500]
                         print(f"[WARN] ffmpeg compatibility stream failed ({file_id}): {stderr_text}")
                     else:
+                        with compat_stream_lock:
+                            compat_stream_stats["lastError"] = f"ffmpeg_exit_{return_code}"
                         print(f"[WARN] ffmpeg compatibility stream failed ({file_id}) with code {return_code}")
                 else:
                     duration = max(0.001, time.time() - start_time)
                     speed = (total_bytes / 1024 / 1024) / duration
+                    with compat_stream_lock:
+                        compat_stream_stats["successfulStreams"] += 1
+                        compat_stream_stats["totalBytes"] += total_bytes
+                        compat_stream_stats["lastError"] = None
+                        compat_stream_stats["lastDurationSec"] = round(duration, 3)
+                        compat_stream_stats["lastSpeedMBps"] = round(speed, 3)
+                        compat_stream_stats["lastMode"] = "reencode" if compat_force_reencode else "copy"
                     print(f"[COMPAT] {file_id} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)")
 
             except OSError as error:
+                with compat_stream_lock:
+                    compat_stream_stats["failedStreams"] += 1
+                    compat_stream_stats["lastError"] = str(error)[:500]
                 if not self._is_client_disconnect_error(error):
                     print(f"[ERROR] Compatibility stream write error for {file_id}: {error}")
                 return
             except Exception as error:
+                with compat_stream_lock:
+                    compat_stream_stats["failedStreams"] += 1
+                    compat_stream_stats["lastError"] = str(error)[:500]
                 print(f"[ERROR] Compatibility stream failed for {file_id}: {error}")
                 if not self.wfile.closed:
                     self._safe_send_error(502, "Failed to stream compatibility video")

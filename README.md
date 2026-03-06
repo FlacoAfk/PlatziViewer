@@ -246,11 +246,38 @@ credentials = Credentials.from_service_account_file(
 | Endpoint | Método | Descripción |
 |---|---|---|
 | `/api/courses` | GET | Retorna la estructura completa de cursos (desde `courses_cache.json`) |
-| `/api/health` | GET | Estado del servidor y disponibilidad de Drive |
+| `/api/health` | GET | Estado del servidor + Drive + FFmpeg + telemetría de `compatStream` |
+| `/api/video-compatible/{fileId}` | GET | Stream de compatibilidad A/V (FFmpeg remux/transcode) para videos conflictivos |
 | `/api/refresh` | GET | Recarga `courses_cache.json` desde disco (solo cliente local / loopback) |
 | `/api/progress` | GET | Retorna el progreso guardado del usuario |
 | `/api/progress` | POST | Guarda el progreso del usuario en `progress.json` |
 | `/drive/files/{fileId}` | GET | Proxy a Google Drive - transmite el archivo indicado por su file ID |
+
+### Diagnóstico A/V y matriz de pruebas reproducible
+
+Para aislar desincronización progresiva usa esta matriz mínima en el mismo video/clase:
+
+1. **Modo normal** (`/drive/files/{id}`) en navegador web durante 10-15 min.
+2. **Modo normal** en `PlatziViewerDesktop.exe` durante 10-15 min.
+3. **Modo compatibilidad** (`/api/video-compatible/{id}`) en web.
+4. **Modo compatibilidad** en desktop.
+5. Repite cada caso con red estable y con jitter (VPN/móvil/hotspot).
+
+En cada corrida registra:
+- Drift estimado (ms) al minuto 1, 5, 10.
+- Número de correcciones soft/hard (`window.__platziAvSyncLastStats`).
+- Cambios automáticos de calidad y activaciones de compatibilidad.
+- Snapshot de `http://localhost:8080/api/health` (`compatStream.lastMode`, `lastError`, `lastSpeedMBps`, `failedStreams`).
+
+Si el archivo falla en `copy` pero mejora en transcode, puedes forzar reencode del endpoint compatible:
+
+```bash
+# Windows PowerShell
+$env:PLATZI_COMPAT_FORCE_REENCODE="1"
+python server.py
+```
+
+Esto aumenta uso de CPU, pero suele estabilizar archivos con timestamps dañados.
 
 ### Tipos de Archivo y cómo se Sirven
 

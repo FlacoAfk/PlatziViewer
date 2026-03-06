@@ -153,6 +153,20 @@ export class ApiService {
         }
     }
 
+    static async getHealth() {
+        try {
+            const response = await this._fetchWithTimeout(
+                `${API_URL}/api/health`,
+                { cache: 'no-store' },
+                6000
+            );
+            if (!response.ok) throw this._buildError(`health_http_${response.status}`);
+            return await response.json();
+        } catch (error) {
+            throw error?.code ? error : this._buildError('health_network', error);
+        }
+    }
+
     static getVideoUrl(fileId) {
         const safeRef = this._normalizeDriveRef(fileId);
         if (!safeRef) return '';
