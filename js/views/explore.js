@@ -1,5 +1,6 @@
 import { state } from '../services/state.js';
 import { Card } from '../components/card.js';
+import { bindHashNavigation } from '../utils/view-helpers.js';
 
 export default class ExploreView {
     constructor() {
@@ -93,6 +94,8 @@ export default class ExploreView {
             });
         }
 
+        if (results) bindHashNavigation(results);
+
         filterChips.forEach(chip => {
             chip.addEventListener('click', () => {
                 filterChips.forEach(c => c.classList.remove('active'));
@@ -119,11 +122,13 @@ export default class ExploreView {
             resultsEl.innerHTML = this.renderAllRoutes();
             const total = this.data.stats?.totalRoutes || 0;
             statsEl.innerHTML = `<span>${total} rutas disponibles</span>`;
+            bindHashNavigation(resultsEl);
             return;
         }
 
         resultsEl.innerHTML = this.renderResults(items);
         const label = items.length === 1 ? 'resultado' : 'resultados';
         statsEl.innerHTML = `<span>${items.length} ${label} encontrados</span>`;
+        bindHashNavigation(resultsEl);
     }
 }

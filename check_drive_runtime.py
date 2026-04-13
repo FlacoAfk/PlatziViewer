@@ -1,7 +1,7 @@
 import json
 import sys
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
 
 URL = "http://localhost:8080/api/self-check-drive"
 

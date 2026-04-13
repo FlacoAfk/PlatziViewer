@@ -76,7 +76,6 @@
 
 .ring-fill-lg {
     fill: none;
-    stroke: url(#progressGradient);
     stroke: var(--accent-primary);
     stroke-width: 8;
     stroke-linecap: round;

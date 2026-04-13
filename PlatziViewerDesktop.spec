@@ -4,7 +4,7 @@
 a = Analysis(
     ['desktop_app.py'],
     pathex=[],
-    binaries=[],
+    binaries=[('C:\\Ffmpeg\\bin\\ffmpeg.exe', '.')],
     datas=[('index.html', '.'), ('css', 'css'), ('favicon.ico', '.'), ('favicon.svg', '.'), ('js', 'js'), ('courses_cache.json', '.'), ('service_account.json', '.')],
     hiddenimports=['drive_service', 'google.oauth2.service_account', 'googleapiclient.discovery', 'google.auth.transport.requests', 'requests', 'webview.platforms.edgechromium', 'webview.platforms.winforms', 'webview.platforms.cef'],
     hookspath=[],
@@ -26,7 +26,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

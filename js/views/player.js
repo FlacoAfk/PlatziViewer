@@ -1,5 +1,6 @@
 import { state } from '../services/state.js';
 import { ApiService } from '../services/api.js';
+import { bindHashNavigation, safeGetLocalStorage, safeSetLocalStorage } from '../utils/view-helpers.js';
 
 export default class PlayerView {
     constructor(params) {
@@ -33,8 +34,265 @@ export default class PlayerView {
         this._avSyncStats = null;
         this._lastCompatHealthSnapshot = null;
         this._compatHealthFetchInFlight = null;
+        this._metadataDurationRetryTimer = null;
+        this._updateTimeDisplay = null;
+        this._updateProgressState = null;
+        this._repairStatus = null;
+        this._repairPollingTimer = null;
+        this._repairPollingInFlight = false;
+        this._autoRepairRequested = false;
+        this._autoRepairKickoffTimer = null;
+    }
 
-        window.__playerView = this;
+    _hasDriveVideoRef() {
+        const fileRef = String(this.videoFileRef ?? '').trim();
+        return !!fileRef && !fileRef.startsWith('local:');
+    }
+
+    _escapeAttr(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    _getVideoDownloadName() {
+        const safeName = this.classData?.name
+            ? this.classData.name.replace(/[^a-zA-Z0-9 ]/g, '')
+            : 'Video';
+        return `${safeName}.mp4`;
+    }
+
+    _getViewRoot() {
+        return document.querySelector('.view-player');
+    }
+
+    _getSidebarContent() {
+        return document.querySelector('.sidebar-content');
+    }
+
+    _getVideoElement() {
+        return this._videoEl || document.getElementById('mainVideo');
+    }
+
+    _getVideoContainerElement() {
+        return document.getElementById('videoContainer');
+    }
+
+    _getVideoWrapperElement() {
+        return document.getElementById('videoWrapper');
+    }
+
+    _refreshSidebar() {
+        const sidebar = this._getSidebarContent();
+        if (!sidebar) return null;
+
+        sidebar.innerHTML = this.renderSidebar();
+        bindHashNavigation(sidebar);
+        return sidebar;
+    }
+
+    _applyViewportMode(view = this._getViewRoot()) {
+        if (!view) return;
+
+        view.classList.toggle('touch-mode', this._isTouchMode);
+        if (this._isTouchMode) {
+            view.classList.remove('sidebar-collapsed');
+        } else {
+            view.classList.remove('sidebar-classes-collapsed');
+        }
+    }
+
+    _isEditableShortcutTarget(target) {
+        return target?.tagName === 'INPUT'
+            || target?.tagName === 'TEXTAREA'
+            || target?.isContentEditable === true;
+    }
+
+    _getBufferedEnd(video) {
+        if (!video?.buffered?.length) return 0;
+        try {
+            return video.buffered.end(video.buffered.length - 1) || 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    _getSeekableEnd(video) {
+        if (!video?.seekable?.length) return 0;
+        try {
+            return video.seekable.end(video.seekable.length - 1) || 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    _clearMetadataDurationRetry() {
+        if (!this._metadataDurationRetryTimer) return;
+        window.clearTimeout(this._metadataDurationRetryTimer);
+        this._metadataDurationRetryTimer = null;
+    }
+
+    _scheduleVideoDurationSync(video, attempt = 0) {
+        if (this._isDestroyed || this.videoTotalDuration > 0 || !this._hasDriveVideoRef()) return;
+
+        const retryDelaysMs = [0, 1800, 4500, 9000];
+        const delayMs = retryDelaysMs[attempt];
+        if (delayMs === undefined) return;
+
+        this._clearMetadataDurationRetry();
+        this._metadataDurationRetryTimer = window.setTimeout(async () => {
+            this._metadataDurationRetryTimer = null;
+            if (this._isDestroyed || this.videoTotalDuration > 0 || !this._hasDriveVideoRef()) return;
+            if (video && video !== this._getVideoElement()) return;
+
+            const meta = await ApiService.getVideoMetadata(this.videoFileRef);
+            if (this._isDestroyed) return;
+
+            const durationMillis = Number.parseInt(meta?.videoMediaMetadata?.durationMillis ?? '', 10);
+            if (Number.isFinite(durationMillis) && durationMillis > 0) {
+                this.videoTotalDuration = durationMillis / 1000;
+                this._updateTimeDisplay?.();
+                this._updateProgressState?.();
+                video?.dispatchEvent(new Event('progress'));
+                return;
+            }
+
+            this._scheduleVideoDurationSync(video, attempt + 1);
+        }, delayMs);
+    }
+
+    _getDisplayDuration(video) {
+        if (Number.isFinite(this.videoTotalDuration) && this.videoTotalDuration > 0) {
+            return this.videoTotalDuration;
+        }
+
+        if (this._hasDriveVideoRef()) {
+            return 0;
+        }
+
+        const mediaDuration = Number(video?.duration);
+        if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) {
+            return 0;
+        }
+
+        const bufferedEnd = this._getBufferedEnd(video);
+        if (bufferedEnd > 0 && mediaDuration <= bufferedEnd + 1) {
+            return 0;
+        }
+
+        return mediaDuration;
+    }
+
+    _getProgressDuration(video) {
+        if (Number.isFinite(this.videoTotalDuration) && this.videoTotalDuration > 0) {
+            return this.videoTotalDuration;
+        }
+
+        const mediaDuration = Number(video?.duration);
+        if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) {
+            return 0;
+        }
+
+        return mediaDuration;
+    }
+
+    _getSeekTarget(video, targetTime) {
+        if (!Number.isFinite(targetTime)) return null;
+
+        const requested = Math.max(0, targetTime);
+        const seekableEnd = this._getSeekableEnd(video);
+        if (seekableEnd > 0) {
+            return Math.min(requested, seekableEnd);
+        }
+
+        if (Number.isFinite(this.videoTotalDuration) && this.videoTotalDuration > 0) {
+            return Math.min(requested, this.videoTotalDuration);
+        }
+
+        const playbackDuration = Number(video?.duration);
+        if (Number.isFinite(playbackDuration) && playbackDuration > 0) {
+            return Math.min(playbackDuration, requested);
+        }
+
+        const progressDuration = this._getProgressDuration(video);
+        if (progressDuration > 0) {
+            return Math.min(progressDuration, requested);
+        }
+
+        return 0;
+    }
+
+    _formatPlaybackTime(seconds, fallback = '0:00') {
+        if (!Number.isFinite(seconds) || seconds < 0) return fallback;
+        const m = Math.floor(seconds / 60);
+        const sec = Math.floor(seconds % 60);
+        return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+    }
+
+    _renderTimeDisplay(timeDisplay, video, currentTime = null) {
+        if (!timeDisplay) return 0;
+
+        const current = Number.isFinite(currentTime) ? currentTime : (Number(video?.currentTime) || 0);
+        const duration = this._getDisplayDuration(video);
+        timeDisplay.textContent = `${this._formatPlaybackTime(current)} / ${duration ? this._formatPlaybackTime(duration) : '--:--'}`;
+        return duration;
+    }
+
+    _bindPlayerActions(root) {
+        if (!root || this._playerActionRoot === root) return;
+        if (this._playerActionRoot && this._playerActionHandler) {
+            this._playerActionRoot.removeEventListener('click', this._playerActionHandler);
+        }
+
+        this._playerActionRoot = root;
+        this._playerActionHandler = (event) => {
+            const actionElement = event.target.closest('[data-player-action]');
+            if (!actionElement || !root.contains(actionElement)) return;
+
+            switch (actionElement.dataset.playerAction) {
+                case 'open-external':
+                    event.preventDefault();
+                    this.openInExternalPlayer();
+                    break;
+                case 'download':
+                    this.promptDownload(
+                        event,
+                        actionElement.href,
+                        actionElement.dataset.downloadName || 'file.download'
+                    );
+                    break;
+                case 'navigate-class':
+                    event.preventDefault();
+                    this.navigateClass(parseInt(actionElement.dataset.direction || '0', 10) || 0);
+                    break;
+                case 'toggle-sidebar':
+                    this.toggleSidebar(event);
+                    break;
+                case 'mark-complete':
+                    event.preventDefault();
+                    this.markComplete();
+                    break;
+                case 'repair-video':
+                    event.preventDefault();
+                    this.requestVideoRepair();
+                    break;
+                case 'toggle-sidebar-classes':
+                    this.toggleSidebarClasses(event);
+                    break;
+                case 'toggle-collapse': {
+                    event.preventDefault();
+                    const section = actionElement.closest('.resources-summary');
+                    if (section) section.classList.toggle('collapsed');
+                    break;
+                }
+                default:
+                    break;
+            }
+        };
+
+        root.addEventListener('click', this._playerActionHandler);
     }
 
     _getSyncPromptDismissKey() {
@@ -47,41 +305,25 @@ export default class PlayerView {
     }
 
     _isAutoExternalEnabledForSync() {
-        try {
-            return localStorage.getItem(this._getSyncAutoExternalKey()) === '1';
-        } catch (e) {
-            return false;
-        }
+        return safeGetLocalStorage(this._getSyncAutoExternalKey(), '') === '1';
     }
 
     _setAutoExternalEnabledForSync(enabled) {
-        try {
-            localStorage.setItem(this._getSyncAutoExternalKey(), enabled ? '1' : '0');
-        } catch (e) {
-            // no-op
-        }
+        safeSetLocalStorage(this._getSyncAutoExternalKey(), enabled ? '1' : '0');
     }
 
     _dismissSyncPromptForCurrentClass() {
         this._syncPromptDismissed = true;
         const key = this._getSyncPromptDismissKey();
         if (!key) return;
-        try {
-            localStorage.setItem(key, '1');
-        } catch (e) {
-            // no-op
-        }
+        safeSetLocalStorage(key, '1');
     }
 
     _loadSyncPromptPreferenceForCurrentClass() {
         this._syncPromptDismissed = false;
         const key = this._getSyncPromptDismissKey();
         if (!key) return;
-        try {
-            this._syncPromptDismissed = localStorage.getItem(key) === '1';
-        } catch (e) {
-            this._syncPromptDismissed = false;
-        }
+        this._syncPromptDismissed = safeGetLocalStorage(key, '') === '1';
     }
 
     _hideSyncCompatibilityPrompt() {
@@ -145,7 +387,7 @@ export default class PlayerView {
 
         this._captureCompatibilityHealth('compat_activate_attempt').catch(() => null);
 
-        const video = this._videoEl || document.getElementById('mainVideo');
+        const video = this._getVideoElement();
         if (!video) return false;
 
         const compatUrl = ApiService.getCompatibleVideoUrl(this.videoFileRef);
@@ -227,7 +469,7 @@ export default class PlayerView {
     _showSyncCompatibilityPrompt(forceVlcOnly = false) {
         if (this._isDestroyed || this._syncPromptDismissed || this._syncPromptVisible) return;
 
-        const container = document.getElementById('videoContainer');
+        const container = this._getVideoContainerElement();
         if (!container) return;
 
         this._hideSyncCompatibilityPrompt();
@@ -383,6 +625,148 @@ export default class PlayerView {
         );
     }
 
+    _stopRepairPolling() {
+        if (!this._repairPollingTimer) return;
+        window.clearInterval(this._repairPollingTimer);
+        this._repairPollingTimer = null;
+    }
+
+    _repairStatusLabel(status) {
+        const isAutoRunning = !!this._repairStatus?.isAuto
+            && (status === 'pending' || status === 'in_progress');
+        if (isAutoRunning) {
+            return '⏳ Generando seek (reparando)...';
+        }
+
+        switch (status) {
+            case 'pending':
+                return 'Reparación en cola';
+            case 'in_progress':
+                return 'Reparando video...';
+            case 'completed':
+                return 'Reparado ✓';
+            case 'failed':
+                return 'Reparación falló';
+            default:
+                return '';
+        }
+    }
+
+    _setRepairStatus(status, extra = '', meta = {}) {
+        this._repairStatus = status ? { status, extra, ...meta } : null;
+        const badge = document.getElementById('repairStatusBadge');
+        const button = document.getElementById('repairVideoBtn');
+        if (badge) {
+            const label = this._repairStatusLabel(status);
+            const shouldShowExtra = !this._repairStatus?.isAuto || (status !== 'pending' && status !== 'in_progress');
+            badge.textContent = shouldShowExtra && extra ? `${label} ${extra}` : label;
+            badge.style.display = label ? '' : 'none';
+        }
+        if (button) {
+            const running = status === 'pending' || status === 'in_progress';
+            button.disabled = running;
+            button.style.opacity = running ? '0.6' : '';
+        }
+    }
+
+    _maybeAutoRequestRepair(_reason) {
+        if (this._autoRepairRequested) return;
+        if (this._repairStatus?.status === 'pending' || this._repairStatus?.status === 'in_progress') return;
+        if (this.videoUrl?.includes('/api/repaired/')) return;
+        if (!this.videoFileRef) return;
+
+        console.log(`[A/V] Disparando auto-reparación por: ${_reason}`);
+        this._autoRepairRequested = true;
+        this.requestVideoRepair(true);
+    }
+
+    _switchToRepairedSource() {
+        const video = this._getVideoElement();
+        if (!video || !this.videoFileRef) return;
+
+        const repairedUrl = ApiService.getRepairedVideoUrl(this.videoFileRef);
+        if (!repairedUrl) return;
+
+        const sourceTag = video.querySelector('source');
+        const currentSrc = sourceTag?.src || video.currentSrc || video.src || '';
+        if (currentSrc.includes('/api/repaired/')) {
+            this.videoUrl = repairedUrl;
+            return;
+        }
+
+        const previousTime = video.currentTime || 0;
+        const wasPaused = video.paused;
+
+        this.videoUrl = repairedUrl;
+        if (sourceTag) sourceTag.src = repairedUrl;
+        video.src = repairedUrl;
+        video.load();
+        video.addEventListener('loadedmetadata', () => {
+            if (Number.isFinite(previousTime) && previousTime > 0) {
+                this._seekToTime?.(previousTime);
+            }
+            if (!wasPaused) {
+                this._playWhenReady?.();
+            }
+        }, { once: true });
+    }
+
+    async _pollRepairStatusOnce() {
+        if (this._repairPollingInFlight || !this.videoFileRef || this._isDestroyed) return;
+        this._repairPollingInFlight = true;
+        try {
+            const status = await ApiService.getRepairStatus(this.videoFileRef);
+            if (this._isDestroyed) return;
+
+            const progress = Number.isFinite(Number(status?.progress))
+                ? `(${Math.round(Number(status.progress) * 100)}%)`
+                : '';
+            this._setRepairStatus(status?.status, progress, { isAuto: !!this._repairStatus?.isAuto });
+
+            if (status?.status === 'completed') {
+                ApiService.rememberRepairedArtifact(this.videoFileRef, status);
+                this._switchToRepairedSource();
+                this._stopRepairPolling();
+            } else if (status?.status === 'failed') {
+                this._stopRepairPolling();
+            }
+        } catch (error) {
+            if (error?.code === 'repair_status_http_404') {
+                this._stopRepairPolling();
+            }
+        } finally {
+            this._repairPollingInFlight = false;
+        }
+    }
+
+    _startRepairPolling() {
+        if (this._repairPollingTimer || !this.videoFileRef) return;
+        this._repairPollingTimer = window.setInterval(() => {
+            this._pollRepairStatusOnce();
+        }, 3000);
+        this._pollRepairStatusOnce();
+    }
+
+    async requestVideoRepair(isAuto = false) {
+        if (!this.videoFileRef) return;
+        try {
+            const payload = await ApiService.requestRepair(this.videoFileRef);
+            const status = payload?.status || 'pending';
+            this._setRepairStatus(status, status === 'completed' ? '' : '(0%)', { isAuto });
+
+            if (status === 'completed') {
+                ApiService.rememberRepairedArtifact(this.videoFileRef, payload);
+                this._switchToRepairedSource();
+                return;
+            }
+
+            this._startRepairPolling();
+        } catch (error) {
+            this._setRepairStatus('failed', '', { isAuto });
+            console.warn('[REPAIR] No se pudo iniciar la reparación:', error);
+        }
+    }
+
     _getRecommendedQualityLabel(qualities) {
         if (!qualities?.length) return 'Original';
 
@@ -519,7 +903,11 @@ export default class PlayerView {
         this.videoUrl = this.classData.hasVideo && this.classData.files?.video
             ? ApiService.getVideoUrl(this.classData.files.video)
             : null;
+        this.videoUrlRaw = this.classData.hasVideo && this.classData.files?.video
+            ? ApiService.getVideoUrlRaw(this.classData.files.video)
+            : null;
         this.videoFileRef = this.classData.files?.video || null;
+        this._repairStatus = this.videoUrl?.includes('/api/repaired/') ? { status: 'completed' } : null;
         const subtitleUrl = this.classData.hasSubtitles && this.classData.files?.subtitles
             ? ApiService.getFileUrl(this.classData.files.subtitles)
             : null;
@@ -561,17 +949,20 @@ export default class PlayerView {
                             ${this.videoUrl ? `
                             <!-- Floating overlay (Opera-style, top-center) -->
                             <div class="video-overlay" id="videoOverlay">
-                                <button class="overlay-btn" onclick="window.__playerView.openInExternalPlayer()" title="Abrir en Reproductor Externo (VLC)">
+                                <button class="overlay-btn" data-player-action="open-external" title="Abrir en Reproductor Externo (VLC)">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                                 </button>
-                                <a href="${this.videoUrl}" download class="overlay-btn" title="Descargar video">
+                                <a href="${this.videoUrlRaw || this.videoUrl}" download class="overlay-btn" title="Descargar video" data-player-action="download" data-download-name="${this._escapeAttr(this._getVideoDownloadName())}">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 </a>
-                                <button class="overlay-btn" onclick="window.__playerView.navigateClass(-1)" title="Anterior">
+                                <button class="overlay-btn" data-player-action="navigate-class" data-direction="-1" title="Anterior">
                                     <svg class="overlay-nav-icon overlay-nav-icon-prev" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg>
                                 </button>
-                                <button class="overlay-btn" onclick="window.__playerView.navigateClass(1)" title="Siguiente">
+                                <button class="overlay-btn" data-player-action="navigate-class" data-direction="1" title="Siguiente">
                                     <svg class="overlay-nav-icon overlay-nav-icon-next" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg>
+                                </button>
+                                <button class="overlay-btn" id="repairVideoBtn" data-player-action="repair-video" title="Reparar A/V y habilitar seek estable">
+                                    🛠️
                                 </button>
                             </div>
 
@@ -619,7 +1010,7 @@ export default class PlayerView {
                                             </div>
                                         </div>
                                         ` : ''}
-                                        <button class="yt-btn" onclick="window.__playerView.openInExternalPlayer()" title="Abrir en Reproductor Externo (VLC)">
+                                        <button class="yt-btn" data-player-action="open-external" title="Abrir en Reproductor Externo (VLC)">
                                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                                         </button>
                                         <button class="yt-btn" id="ytSpeed" title="Velocidad">1x</button>
@@ -636,7 +1027,7 @@ export default class PlayerView {
                                 <button
                                     class="player-sidebar-fab"
                                     id="playerSidebarFab"
-                                    onclick="window.__playerView.toggleSidebar(event)"
+                                    data-player-action="toggle-sidebar"
                                     title="Ocultar/Mostrar temario"
                                     aria-label="Ocultar/Mostrar temario"
                                     aria-pressed="false"
@@ -660,13 +1051,14 @@ export default class PlayerView {
                         <div class="player-info">
                             <h2 id="videoTitle">${this.classData.name}</h2>
                             <p class="player-course-name">${this.courseData?.name || ''}</p>
+                            <p id="repairStatusBadge" style="margin-top:6px;font-size:.78rem;color:var(--text-muted);display:${this._repairStatus ? '' : 'none'};">${this._repairStatus ? this._repairStatusLabel(this._repairStatus.status) : ''}</p>
                         </div>
                         <div class="player-actions">
                             <a href="${backHash}" class="btn-action-pill btn-back">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m7-7l-7 7 7 7"/></svg>
                                 Volver
                             </a>
-                            <button class="btn-action-pill btn-complete" onclick="window.__playerView.markComplete()">
+                            <button class="btn-action-pill btn-complete" data-player-action="mark-complete">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                                 Completada
                             </button>
@@ -685,7 +1077,7 @@ export default class PlayerView {
                         <button
                             class="sidebar-classes-toggle"
                             id="sidebarClassesToggle"
-                            onclick="window.__playerView.toggleSidebarClasses(event)"
+                            data-player-action="toggle-sidebar-classes"
                             title="Ocultar/Mostrar clases"
                             aria-label="Ocultar/Mostrar clases"
                             aria-pressed="false"
@@ -724,13 +1116,22 @@ export default class PlayerView {
             const fileItems = resources.map(r => {
                 const icon = this._getExtIcon(r.ext);
                 const url = ApiService.getFileUrl(r.file);
+                
+                let dlName = r.name || '';
+                if (r.ext) {
+                    const extStr = r.ext.startsWith('.') ? r.ext : '.' + r.ext;
+                    if (!dlName.toLowerCase().endsWith(extStr.toLowerCase())) {
+                        dlName += extStr;
+                    }
+                }
+                
                 if (r.viewable) {
                     return `
                         <div class="resource-file-item">
                             <span class="rf-icon">${icon}</span>
                             <a href="${url}" target="_blank" class="rf-name" title="${r.name}">${r.name}</a>
                             <span class="rf-ext">${r.ext}</span>
-                            <a href="${url}" download class="rf-action rf-download" title="Descargar">
+                            <a href="${url}" download class="rf-action rf-download" title="Descargar" data-player-action="download" data-download-name="${this._escapeAttr(dlName)}">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             </a>
                         </div>
@@ -741,7 +1142,7 @@ export default class PlayerView {
                             <span class="rf-icon">${icon}</span>
                             <span class="rf-name" title="${r.name}">${r.name}</span>
                             <span class="rf-ext">${r.ext}</span>
-                            <a href="${url}" download class="rf-action rf-download" title="Descargar">
+                            <a href="${url}" download class="rf-action rf-download" title="Descargar" data-player-action="download" data-download-name="${this._escapeAttr(dlName)}">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 Descargar
                             </a>
@@ -761,7 +1162,7 @@ export default class PlayerView {
         // Summary iframe (always open if available)
         const summaryFrame = summaryUrl ? `
             <div class="resources-summary">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <div class="rs-header" data-player-action="toggle-collapse">
                     <span>📄 Resumen de la clase</span>
                     <span class="rs-toggle">▼</span>
                 </div>
@@ -773,7 +1174,7 @@ export default class PlayerView {
 
         const readingFrame = readingUrl ? `
             <div class="resources-summary collapsed">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <div class="rs-header" data-player-action="toggle-collapse">
                     <span>📚 Lecturas recomendadas</span>
                     <span class="rs-toggle">▼</span>
                 </div>
@@ -785,7 +1186,7 @@ export default class PlayerView {
 
         const htmlFrame = htmlUrl ? `
             <div class="resources-summary collapsed">
-                <div class="rs-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <div class="rs-header" data-player-action="toggle-collapse">
                     <span>🌐 Contenido HTML</span>
                     <span class="rs-toggle">▼</span>
                 </div>
@@ -837,7 +1238,7 @@ export default class PlayerView {
 
                 return `
                             <div class="sb-class ${isActive ? 'sb-active' : ''} ${isComplete ? 'sb-complete' : ''} ${hasVideo ? 'sb-clickable' : ''}"
-                                 onclick="${hasVideo ? `window.location.hash='#player/${this.catIdx}/${this.routeIdx}/${this.courseIdx}/${modIdx}/${classIdx}'` : ''}">
+                                 ${hasVideo ? `data-href="#player/${this.catIdx}/${this.routeIdx}/${this.courseIdx}/${modIdx}/${classIdx}"` : ''}>
                                 <div class="sb-class-indicator">
                                     ${isComplete ? '<span class="sb-check">✓</span>' : isActive ? '<span class="sb-playing">▶</span>' : `<span class="sb-idx">${classIdx + 1}</span>`}
                                 </div>
@@ -856,8 +1257,7 @@ export default class PlayerView {
 
     markComplete() {
         state.markClassComplete(this.classKey);
-        const sidebar = document.querySelector('.sidebar-content');
-        if (sidebar) sidebar.innerHTML = this.renderSidebar();
+        this._refreshSidebar();
         // Visual feedback on the button
         const btn = document.querySelector('.btn-complete');
         if (btn) {
@@ -889,7 +1289,8 @@ export default class PlayerView {
     async openInExternalPlayer() {
         if (!this.videoUrl) return;
 
-        const streamUrl = this.videoUrl;
+        // Prefer raw URL for external players — VLC fixes timestamps itself
+        const streamUrl = this.videoUrlRaw || this.videoUrl;
 
         // 1. Try to open via backend (local server functionality)
         try {
@@ -954,7 +1355,7 @@ export default class PlayerView {
     }
 
     _syncSidebarToggleButtons() {
-        const view = document.querySelector('.view-player');
+        const view = this._getViewRoot();
         const fab = document.getElementById('playerSidebarFab');
         if (!view || !fab) return;
 
@@ -973,14 +1374,14 @@ export default class PlayerView {
 
         if (this._isTouchMode) return;
 
-        const view = document.querySelector('.view-player');
+        const view = this._getViewRoot();
         if (!view) return;
         view.classList.toggle('sidebar-collapsed');
         this._syncSidebarToggleButtons();
     }
 
     _syncSidebarClassesToggleButtons() {
-        const view = document.querySelector('.view-player');
+        const view = this._getViewRoot();
         const toggle = document.getElementById('sidebarClassesToggle');
         const icon = document.getElementById('sidebarClassesToggleIcon');
         if (!view || !toggle || !icon) return;
@@ -1000,7 +1401,7 @@ export default class PlayerView {
 
         if (!this._isTouchMode) return;
 
-        const view = document.querySelector('.view-player');
+        const view = this._getViewRoot();
         if (!view) return;
 
         view.classList.toggle('sidebar-classes-collapsed');
@@ -1009,8 +1410,8 @@ export default class PlayerView {
 
     // ─── YouTube-style custom controls logic ───
     _setupCustomControls() {
-        const video = document.getElementById('mainVideo');
-        const container = document.getElementById('videoContainer');
+        const video = this._getVideoElement();
+        const container = this._getVideoContainerElement();
         if (!video || !container) return;
 
         const playPauseBtn = document.getElementById('ytPlayPause');
@@ -1032,8 +1433,6 @@ export default class PlayerView {
         const qualityWrap = document.getElementById('ytQualityWrap');
         const qualityBtn = document.getElementById('ytQualityBtn');
         const qualityMenu = document.getElementById('ytQualityMenu');
-        const overlay = document.getElementById('videoOverlay');
-        const controls = document.getElementById('ytControls');
 
         const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
         let currentSpeedIdx = 2;
@@ -1079,11 +1478,9 @@ export default class PlayerView {
             manualSpeedOverride = Math.abs(video.playbackRate - 1) > 0.001;
         };
 
-        // Format time
-        const fmt = (s) => {
-            const m = Math.floor(s / 60);
-            const sec = Math.floor(s % 60);
-            return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+        const getPlaybackDuration = () => {
+            const duration = Number(video.duration);
+            return Number.isFinite(duration) && duration > 0 ? duration : 0;
         };
 
         const playWhenReady = () => {
@@ -1094,23 +1491,49 @@ export default class PlayerView {
             }
         };
 
+        const isCompatSource = () => String(video.currentSrc || video.src || '').includes('/api/video-compatible/');
+
+        const getRemainingDuration = () => {
+            const duration = getPlaybackDuration();
+            if (!Number.isFinite(duration) || duration <= 0) return Number.POSITIVE_INFINITY;
+            return Math.max(0, duration - (video.currentTime || 0));
+        };
+
+        const shouldSkipAutoResync = () => {
+            if (isCompatSource()) return true;
+            if ((video.currentTime || 0) < 1.5) return true;
+            if (getRemainingDuration() < 12) return true;
+            return false;
+        };
+
         const seekToTime = (targetTime) => {
-            if (!Number.isFinite(video.duration) || video.duration <= 0) return;
-            const clamped = Math.max(0, Math.min(video.duration, targetTime));
+            const clamped = this._getSeekTarget(video, targetTime);
+            if (!Number.isFinite(clamped)) return;
             const wasPlaying = !video.paused;
             pendingSeekResume = wasPlaying;
             if (wasPlaying) video.pause();
-            video.currentTime = clamped;
+            try {
+                video.currentTime = clamped;
+            } catch (error) {
+                const playbackDuration = getPlaybackDuration();
+                if (!Number.isFinite(playbackDuration) || playbackDuration <= 0) {
+                    pendingSeekResume = false;
+                    if (wasPlaying) playWhenReady();
+                    return;
+                }
+                video.currentTime = Math.max(0, Math.min(playbackDuration, clamped));
+            }
         };
 
         const previewSeekFromClientX = (clientX) => {
             const rect = progressBar.getBoundingClientRect();
             const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-            const target = pct * (video.duration || 0);
+            const dur = this._getProgressDuration(video);
+            const target = pct * dur;
             playedBar.style.width = pct * 100 + '%';
             thumb.style.left = pct * 100 + '%';
-            if (video.duration) {
-                timeDisplay.textContent = `${fmt(target)} / ${fmt(video.duration)}`;
+            if (dur && timeDisplay) {
+                this._renderTimeDisplay(timeDisplay, video, target);
             }
             return target;
         };
@@ -1131,6 +1554,7 @@ export default class PlayerView {
             lastHardResyncMs = now;
 
             if (video.paused || video.seeking) return;
+            if (shouldSkipAutoResync()) return;
 
             this._registerHardResyncEvent();
             const targetTime = Math.max(0, (video.currentTime || 0) - 0.08);
@@ -1141,6 +1565,7 @@ export default class PlayerView {
             const now = Date.now();
             if (now - lastSoftResyncMs < SOFT_RESYNC_COOLDOWN_MS) return;
             if (video.paused || video.seeking) return;
+            if (shouldSkipAutoResync()) return;
 
             const bufferAhead = getBufferAhead();
             if (bufferAhead < 0.3) return;
@@ -1157,6 +1582,14 @@ export default class PlayerView {
         this._playWhenReady = playWhenReady;
         this._seekToTime = seekToTime;
         this._getBufferAhead = getBufferAhead;
+        this._updateTimeDisplay = (currentTime = null) => this._renderTimeDisplay(timeDisplay, video, currentTime);
+        this._updateProgressState = (currentTime = null) => {
+            const duration = this._getProgressDuration(video);
+            const current = Number.isFinite(currentTime) ? currentTime : (Number(video.currentTime) || 0);
+            const safePercent = duration > 0 ? Math.max(0, Math.min(100, (current / duration) * 100)) : 0;
+            playedBar.style.width = safePercent + '%';
+            thumb.style.left = safePercent + '%';
+        };
 
         const urlsMatch = (a, b) => {
             if (!a || !b) return false;
@@ -1186,24 +1619,21 @@ export default class PlayerView {
 
         // Time update → progress bar + time text
         video.addEventListener('timeupdate', () => {
-            if (video.duration) {
-                const pct = (video.currentTime / video.duration) * 100;
-                playedBar.style.width = pct + '%';
-                thumb.style.left = pct + '%';
-                timeDisplay.textContent = `${fmt(video.currentTime)} / ${fmt(video.duration)}`;
-            }
+            this._updateProgressState?.(video.currentTime);
+            this._updateTimeDisplay?.(video.currentTime);
         });
 
         // Buffered
         video.addEventListener('progress', () => {
-            if (video.buffered.length && video.duration) {
+            const dur = this._getProgressDuration(video);
+            if (video.buffered.length && dur) {
                 bufferedBar.style.background = 'transparent';
                 bufferedBar.innerHTML = '';
                 for (let i = 0; i < video.buffered.length; i++) {
                     const start = video.buffered.start(i);
                     const end = video.buffered.end(i);
-                    const left = (start / video.duration) * 100;
-                    const width = ((end - start) / video.duration) * 100;
+                    const left = (start / dur) * 100;
+                    const width = ((end - start) / dur) * 100;
                     const chunk = document.createElement('div');
                     chunk.style.position = 'absolute';
                     chunk.style.left = left + '%';
@@ -1273,7 +1703,6 @@ export default class PlayerView {
 
         // Subtitles (CC toggle)
         const ccBtn = document.getElementById('ytCCBtn');
-        const subtitleTrack = document.getElementById('subtitleTrack');
         if (ccBtn && video.textTracks.length > 0) {
             // Start with subtitles OFF
             video.textTracks[0].mode = 'hidden';
@@ -1320,7 +1749,8 @@ export default class PlayerView {
                 video.load();
 
                 video.addEventListener('loadedmetadata', () => {
-                    if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < video.duration) {
+                    const dur = getPlaybackDuration();
+                    if (Number.isFinite(previousTime) && previousTime > 0 && previousTime < dur) {
                         video.currentTime = previousTime;
                     }
                     if (!wasPaused) {
@@ -1416,20 +1846,32 @@ export default class PlayerView {
                 severeDropStreak = 0;
                 return;
             }
+            if (shouldSkipAutoResync()) {
+                dropSpikeStreak = 0;
+                severeDropStreak = 0;
+                return;
+            }
             if (typeof video.getVideoPlaybackQuality !== 'function') return;
 
             const qualityStats = video.getVideoPlaybackQuality();
             const dropped = qualityStats?.droppedVideoFrames || 0;
             const total = qualityStats?.totalVideoFrames || 0;
+            const currentTime = video.currentTime || 0;
 
             if (!lastFrameStats) {
-                lastFrameStats = { dropped, total };
+                lastFrameStats = { dropped, total, time: currentTime };
                 return;
             }
 
             const droppedDelta = dropped - lastFrameStats.dropped;
             const totalDelta = total - lastFrameStats.total;
-            lastFrameStats = { dropped, total };
+            const timeDelta = currentTime - lastFrameStats.time;
+            lastFrameStats = { dropped, total, time: currentTime };
+
+            if (totalDelta === 0 && timeDelta > 1.5) {
+                softResync();
+                return;
+            }
 
             const sampledFrames = droppedDelta + totalDelta;
             if (sampledFrames < 45) return;
@@ -1484,7 +1926,7 @@ export default class PlayerView {
                 }
                 lastDriftSampleMs = now;
 
-                if (!video.paused && !video.seeking && !manualSpeedOverride && Number.isFinite(metadata?.mediaTime)) {
+                if (!video.paused && !video.seeking && !manualSpeedOverride && !shouldSkipAutoResync() && Number.isFinite(metadata?.mediaTime)) {
                     const driftSeconds = Math.abs((video.currentTime || 0) - metadata.mediaTime);
 
                     if (driftSeconds >= DRIFT_SOFT_THRESHOLD_SECONDS) {
@@ -1520,9 +1962,19 @@ export default class PlayerView {
             this._videoFrameCallbackId = video.requestVideoFrameCallback(frameSyncLoop);
         }
 
-        // Fullscreen (proper API on the wrapper, not video element)
-        const wrapper = document.getElementById('videoWrapper');
+        // Fullscreen (handles generic browser API and native pywebview wrapper)
+        const wrapper = this._getVideoWrapperElement();
+        if (!wrapper) return;
         fullscreenBtn.addEventListener('click', () => {
+            if (window.pywebview && window.pywebview.api) {
+                const isFs = !wrapper.classList.contains('fullscreen');
+                window.pywebview.api.toggle_fullscreen();
+                wrapper.classList.toggle('fullscreen', isFs);
+                iconExpand.style.display = isFs ? 'none' : '';
+                iconCompress.style.display = isFs ? '' : 'none';
+                return;
+            }
+
             if (!document.fullscreenElement) {
                 (wrapper.requestFullscreen || wrapper.webkitRequestFullscreen || wrapper.msRequestFullscreen).call(wrapper);
             } else {
@@ -1562,6 +2014,8 @@ export default class PlayerView {
         // Initial state
         container.classList.add('show-ui');
         updatePlayIcon();
+        this._updateProgressState?.(video.currentTime);
+        this._updateTimeDisplay?.(video.currentTime);
 
         // Double click to fullscreen
         video.addEventListener('dblclick', () => {
@@ -1579,10 +2033,53 @@ export default class PlayerView {
         this._avSyncStats = null;
         this._lastCompatHealthSnapshot = null;
         this._compatHealthFetchInFlight = null;
-        const video = document.getElementById('mainVideo');
+        this._autoRepairRequested = false;
+        if (this._autoRepairKickoffTimer) {
+            window.clearTimeout(this._autoRepairKickoffTimer);
+            this._autoRepairKickoffTimer = null;
+        }
+        this._repairPollingInFlight = false;
+        const video = this._getVideoElement();
         this._videoEl = video || null;
+        this.videoTotalDuration = 0;
+
+        if (this.videoUrl?.includes('/api/video-compatible/')) {
+            this._autoRepairKickoffTimer = window.setTimeout(() => {
+                this._autoRepairKickoffTimer = null;
+                if (this._isDestroyed) return;
+                this._maybeAutoRequestRepair('compat_initial_source');
+            }, 1500);
+        }
+
         if (video) {
             this._setupCustomControls();
+            this._scheduleVideoDurationSync(video);
+            if (this.videoFileRef && !this.videoUrl?.includes('/api/repaired/')) {
+                this._startRepairPolling();
+            }
+
+            // Fallback: if the ffmpeg-remuxed URL fails (no ffmpeg on the system),
+            // retry with the raw Drive URL so video still plays (just without sync fix).
+            if (this.videoUrlRaw && this.videoUrl !== this.videoUrlRaw) {
+                const fallbackToRaw = () => {
+                    if (this._isDestroyed) return;
+                    const sourceTag = video.querySelector('source');
+                    const currentSrc = sourceTag?.src || video.src || '';
+                    // Only fallback if we're still on the compat URL (haven't already switched)
+                    if (!currentSrc.includes('/api/video-compatible/')) return;
+                    console.log('[PLAYER] FFmpeg compat endpoint failed, falling back to raw Drive URL');
+                    if (sourceTag) sourceTag.src = this.videoUrlRaw;
+                    video.src = this.videoUrlRaw;
+                    video.load();
+                    video.play().catch(() => { });
+                };
+                video.addEventListener('error', fallbackToRaw, { once: true });
+                // Also listen on the source tag for network errors
+                const sourceEl = video.querySelector('source');
+                if (sourceEl) {
+                    sourceEl.addEventListener('error', fallbackToRaw, { once: true });
+                }
+            }
 
             // Start only when we have enough forward buffer to reduce A/V drift on heavy classes.
             const startPlayback = () => {
@@ -1620,21 +2117,17 @@ export default class PlayerView {
             });
             video.addEventListener('ended', () => {
                 state.markClassComplete(this.classKey);
-                const sidebar = document.querySelector('.sidebar-content');
-                if (sidebar) sidebar.innerHTML = this.renderSidebar();
+                this._refreshSidebar();
                 setTimeout(() => this.navigateClass(1), 1500);
             });
         }
 
         this._isTouchMode = this._isTouchDevice();
-        const view = document.querySelector('.view-player');
+        const view = this._getViewRoot();
         if (view) {
-            view.classList.toggle('touch-mode', this._isTouchMode);
-            if (this._isTouchMode) {
-                view.classList.remove('sidebar-collapsed');
-            } else {
-                view.classList.remove('sidebar-classes-collapsed');
-            }
+            bindHashNavigation(view);
+            this._bindPlayerActions(view);
+            this._applyViewportMode(view);
         }
         this._syncSidebarToggleButtons();
         this._syncSidebarClassesToggleButtons();
@@ -1644,15 +2137,9 @@ export default class PlayerView {
             if (touchNow === this._isTouchMode) return;
             this._isTouchMode = touchNow;
 
-            const playerView = document.querySelector('.view-player');
+            const playerView = this._getViewRoot();
             if (!playerView) return;
-            playerView.classList.toggle('touch-mode', this._isTouchMode);
-
-            if (this._isTouchMode) {
-                playerView.classList.remove('sidebar-collapsed');
-            } else {
-                playerView.classList.remove('sidebar-classes-collapsed');
-            }
+            this._applyViewportMode(playerView);
             this._syncSidebarToggleButtons();
             this._syncSidebarClassesToggleButtons();
         };
@@ -1660,18 +2147,26 @@ export default class PlayerView {
 
         // Keyboard shortcuts
         this._keyHandler = (e) => {
-            const video = document.getElementById('mainVideo');
+            const video = this._getVideoElement();
             if (e.key === 'ArrowLeft' && e.altKey) this.navigateClass(-1);
             if (e.key === 'ArrowRight' && e.altKey) this.navigateClass(1);
             // Spacebar to play/pause
-            if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            if (e.key === ' ' && !this._isEditableShortcutTarget(e.target)) {
                 e.preventDefault();
                 if (video) video.paused ? video.play() : video.pause();
             }
             // F for fullscreen
-            if (e.key === 'f' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            if (e.key === 'f' && !this._isEditableShortcutTarget(e.target)) {
                 const fsBtn = document.getElementById('ytFullscreen');
                 if (fsBtn) fsBtn.click();
+            }
+            // Escape to exit pywebview fullscreen manually
+            if (e.key === 'Escape' && window.pywebview && window.pywebview.api) {
+                const wrapper = this._getVideoWrapperElement();
+                if (wrapper && wrapper.classList.contains('fullscreen')) {
+                    const fsBtn = document.getElementById('ytFullscreen');
+                    if (fsBtn) fsBtn.click();
+                }
             }
             // Left/Right arrows to seek 5s (with sync fix)
             if (e.key === 'ArrowLeft' && !e.altKey && video) {
@@ -1687,7 +2182,7 @@ export default class PlayerView {
     }
 
     _stopVideoPlayback() {
-        const video = this._videoEl || document.getElementById('mainVideo');
+        const video = this._getVideoElement();
         if (!video) return;
 
         try {
@@ -1706,7 +2201,13 @@ export default class PlayerView {
         }
 
         try {
-            if (document.fullscreenElement) {
+            if (window.pywebview && window.pywebview.api) {
+                const wrapper = this._getVideoWrapperElement();
+                if (wrapper && wrapper.classList.contains('fullscreen')) {
+                    window.pywebview.api.toggle_fullscreen();
+                    wrapper.classList.remove('fullscreen');
+                }
+            } else if (document.fullscreenElement) {
                 (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
             }
         } catch (e) {
@@ -1714,9 +2215,17 @@ export default class PlayerView {
         }
     }
 
+    promptDownload(event, url, suggestedFilename) {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.prompt_save_as) {
+            event.preventDefault();
+            window.pywebview.api.prompt_save_as(url, suggestedFilename || 'file.download');
+        }
+    }
+
     destroy() {
         this._isDestroyed = true;
         this._hideSyncCompatibilityPrompt();
+        this._stopRepairPolling();
 
         if (this._avSyncStats) {
             const elapsedSec = Math.max(1, Math.round((Date.now() - this._avSyncStats.startedAt) / 1000));
@@ -1743,6 +2252,13 @@ export default class PlayerView {
             this._startPlaybackTimeout = null;
         }
 
+        if (this._autoRepairKickoffTimer) {
+            window.clearTimeout(this._autoRepairKickoffTimer);
+            this._autoRepairKickoffTimer = null;
+        }
+
+        this._clearMetadataDurationRetry();
+
         if (this._videoEl && this._startPlaybackCanPlayHandler) {
             this._videoEl.removeEventListener('canplay', this._startPlaybackCanPlayHandler);
             this._startPlaybackCanPlayHandler = null;
@@ -1764,11 +2280,17 @@ export default class PlayerView {
             document.removeEventListener('fullscreenchange', this._fsChangeHandler);
             document.removeEventListener('webkitfullscreenchange', this._fsChangeHandler);
         }
+        if (this._playerActionRoot && this._playerActionHandler) {
+            this._playerActionRoot.removeEventListener('click', this._playerActionHandler);
+            this._playerActionRoot = null;
+            this._playerActionHandler = null;
+        }
         this._videoFrameCallbackId = null;
         this._videoEl = null;
         this._avSyncStats = null;
         this._lastCompatHealthSnapshot = null;
         this._compatHealthFetchInFlight = null;
-        window.__playerView = null;
+        this._updateProgressState = null;
+        this._updateTimeDisplay = null;
     }
 }

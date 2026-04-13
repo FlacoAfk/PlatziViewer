@@ -1,5 +1,6 @@
 import { state } from '../services/state.js';
 import { Card } from '../components/card.js';
+import { bindHashNavigation } from '../utils/view-helpers.js';
 
 export default class HomeView {
     constructor() {
@@ -105,7 +106,10 @@ export default class HomeView {
         const view = document.querySelector('.view-home');
         const categoryPills = document.querySelectorAll('.category-pill[data-cat-section]');
         const sections = document.querySelectorAll('.category-routes-section');
-        if (!view || categoryPills.length === 0 || sections.length === 0) return;
+        if (!view) return;
+
+        bindHashNavigation(view);
+        if (categoryPills.length === 0 || sections.length === 0) return;
 
         const isTouch = window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 

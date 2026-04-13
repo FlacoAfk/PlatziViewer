@@ -5,8 +5,8 @@ This replaces the old server_metadata.json approach. PlatziRoutes.md is parsed
 directly so it becomes the single source of truth for course organization.
 """
 
-import re
 import os
+import re
 
 ROUTES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "PlatziRoutes.md")
 
@@ -91,7 +91,7 @@ def parse(filepath=None):
         print(f"❌ Error: {filepath} no encontrado.")
         return {"categories": [], "stats": {}}
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         lines = f.readlines()
 
     categories = []
@@ -183,7 +183,7 @@ def print_summary(data):
     stats = data["stats"]
 
     print(f"\n{'='*60}")
-    print(f"📊 PlatziRoutes.md Summary")
+    print("📊 PlatziRoutes.md Summary")
     print(f"{'='*60}")
     print(f"  Schools:  {stats['totalCategories']}")
     print(f"  Routes:   {stats['totalRoutes']}")

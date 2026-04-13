@@ -1,6 +1,6 @@
 import re
 
-with open("DriveCourses.md", "r", encoding="utf-8") as f:
+with open("DriveCourses.md", encoding="utf-8") as f:
     drive_lines = f.readlines()
 drive_courses = set()
 for line in drive_lines:
@@ -8,7 +8,7 @@ for line in drive_lines:
     if line.startswith("- "):
         drive_courses.add(line[2:].strip())
 
-with open("PlatziRoutes.md", "r", encoding="utf-8") as f:
+with open("PlatziRoutes.md", encoding="utf-8") as f:
     md = f.read()
 
 course_pattern = re.compile(r"^- \[(.+?)\]\((.+?)\)\s*$", re.MULTILINE)

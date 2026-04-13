@@ -1,5 +1,6 @@
 import { state } from '../services/state.js';
 import { Card } from '../components/card.js';
+import { bindAccordionToggles, bindHashNavigation } from '../utils/view-helpers.js';
 
 export default class RouteView {
     constructor(params) {
@@ -107,7 +108,7 @@ export default class RouteView {
 
             return `
                 <div class="module-item" id="mod-${modIdx}">
-                    <div class="module-header" onclick="document.getElementById('mod-${modIdx}').classList.toggle('active')">
+                    <div class="module-header" data-toggle-target="mod-${modIdx}" role="button" tabindex="0">
                         <div class="module-header-left">
                             <span class="module-num">${modIdx + 1}</span>
                             <h3>${mod.name}</h3>
@@ -125,7 +126,7 @@ export default class RouteView {
                 const hasVideo = cls.hasVideo && cls.files?.video;
 
                 return `
-                                <div class="class-row ${status}" onclick="${hasVideo ? `window.location.hash='#player/${this.catIdx}/${this.routeIdx}/0/${modIdx}/${classIdx}'` : ''}">
+                                <div class="class-row ${status}" ${hasVideo ? `data-href="#player/${this.catIdx}/${this.routeIdx}/0/${modIdx}/${classIdx}" role="link" tabindex="0"` : ''}>
                                     <span class="status-icon">${statusIcon}</span>
                                     <span class="class-icon">${cls.hasVideo ? '📹' : cls.hasHtml ? '⚡' : '📝'}</span>
                                     <span class="class-name">${cls.name}</span>
@@ -141,6 +142,14 @@ export default class RouteView {
                 </div>
             `;
         }).join('');
+    }
+
+    mounted() {
+        const root = document.querySelector('.view-route, .view-course');
+        if (!root) return;
+
+        bindHashNavigation(root);
+        bindAccordionToggles(root);
     }
 
     /** Extract numeric prefix from Drive folder name: "05. Curso..." → 5 */

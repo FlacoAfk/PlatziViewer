@@ -11,9 +11,9 @@ except Exception:
 
 try:
     from PyQt6.QtCore import QUrl
-    from PyQt6.QtWidgets import QApplication, QMainWindow
+    from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog
     from PyQt6.QtWebEngineWidgets import QWebEngineView
-    from PyQt6.QtWebEngineCore import QWebEngineProfile
+    from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEngineDownloadRequest
     from PyQt6.QtGui import QIcon
 except Exception:
     QApplication = None
@@ -98,7 +98,34 @@ def _run_pyqt_window(target_url, resources, exe_dir, server):
     profile.setPersistentStoragePath(storage_path)
     profile.setCachePath(storage_path)
 
+    def handle_download(download: QWebEngineDownloadRequest):
+        options = QFileDialog.Option.DontUseNativeDialog if os.name != 'nt' else QFileDialog.Option(0)
+        suggested = download.suggestedFileName()
+        downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+        init_path = os.path.join(downloads_dir, suggested) if suggested else downloads_dir
+        save_path, _ = QFileDialog.getSaveFileName(
+            window, "Guardar archivo como...", init_path, "All Files (*)", options=options
+        )
+        if save_path:
+            download.setDownloadDirectory(os.path.dirname(save_path))
+            download.setDownloadFileName(os.path.basename(save_path))
+            download.accept()
+        else:
+            download.cancel()
+
+    profile.downloadRequested.connect(handle_download)
+
     browser = QWebEngineView(profile)
+    browser.settings().setAttribute(browser.settings().WebAttribute.FullScreenSupportEnabled, True)
+
+    def on_fullscreen_requested(request):
+        request.accept()
+        if request.toggleOn():
+            window.showFullScreen()
+        else:
+            window.showNormal()
+
+    browser.page().fullScreenRequested.connect(on_fullscreen_requested)
     browser.setUrl(QUrl(target_url))
 
     window.setCentralWidget(browser)
@@ -158,6 +185,39 @@ def main():
     target_url = f"http://{host}:{port}"
 
     if webview is not None:
+        class DesktopAPI:
+            def __init__(self):
+                self.window = None
+
+            def toggle_fullscreen(self):
+                if self.window:
+                    self.window.toggle_fullscreen()
+
+            def prompt_save_as(self, url, suggested_filename):
+                if not self.window:
+                    return
+                # Only pywebview has this, we spawn a thread to download it so we don't block JS
+                try:
+                    import urllib.request
+                    downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+                    result = self.window.create_file_dialog(
+                        webview.SAVE_DIALOG, 
+                        directory=downloads_dir, 
+                        save_filename=suggested_filename
+                    )
+                    if result and len(result) > 0:
+                        save_path = result[0]
+                        def _download():
+                            try:
+                                urllib.request.urlretrieve(url, save_path)
+                            except Exception as e:
+                                print(f"Error downloading: {e}")
+                        threading.Thread(target=_download, daemon=True).start()
+                except Exception as e:
+                    print(f"Error in prompt_save_as: {e}")
+
+        api_instance = DesktopAPI()
+
         window = webview.create_window(
             "Platzi Viewer",
             target_url,
@@ -165,7 +225,9 @@ def main():
             height=820,
             min_size=(980, 640),
             text_select=True,
+            js_api=api_instance
         )
+        api_instance.window = window
 
         def _on_closed():
             try:

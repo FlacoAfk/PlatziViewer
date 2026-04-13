@@ -184,7 +184,7 @@ class DriveService:
         session = self._get_session()
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
         params = {
-            "fields": "id,name,mimeType,size",
+            "fields": "id,name,mimeType,size,videoMediaMetadata/durationMillis",
             "supportsAllDrives": "true",
         }
 

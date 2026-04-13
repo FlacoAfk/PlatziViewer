@@ -8,8 +8,8 @@ Structure: Root → Course Folders → Module Folders → Class Files
 """
 
 import json
-import re
 import os
+import re
 import time
 
 import parse_routes
@@ -87,7 +87,7 @@ def scan_drive_classes(folder_id):
             class_files[num].append(f)
 
     # Viewable extensions
-    VIEWABLE_EXT = {
+    viewable_ext = {
         ".html",
         ".pdf",
         ".png",
@@ -136,7 +136,7 @@ def scan_drive_classes(folder_id):
                 ext = os.path.splitext(fname)[1].lower()
                 if ext and ext != ".ini":
                     display = fname.split(". ", 1)[-1] if ". " in fname else fname
-                    resources.append({"name": display, "file": fid, "ext": ext, "viewable": ext in VIEWABLE_EXT})
+                    resources.append({"name": display, "file": fid, "ext": ext, "viewable": ext in viewable_ext})
 
         if video:
             name = video.rsplit(".", 1)[0]
@@ -256,7 +256,7 @@ PROGRESS_FILE = "drive_scan_progress.json"
 def load_scan_progress():
     """Load previously scanned course data to allow resuming."""
     if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
+        with open(PROGRESS_FILE, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
@@ -410,7 +410,7 @@ def main():
     file_size = os.path.getsize(OUTPUT_FILE)
 
     print(f"\n{'=' * 60}")
-    print(f"✅ Cache rebuilt from Google Drive!")
+    print("✅ Cache rebuilt from Google Drive!")
     print(f"   Categories:     {len(categories)}")
     print(f"   Routes:         {total_routes}")
     print(f"   Course entries: {total_courses}")

@@ -1,4 +1,5 @@
 import { state } from '../services/state.js';
+import { bindHashNavigation } from '../utils/view-helpers.js';
 
 export default class LearningView {
     constructor() {
@@ -91,7 +92,7 @@ export default class LearningView {
         const pct = Math.round(r.percent * 100);
         const href = `#route/${r.catIdx}/${r.routeIdx}`;
         return `
-            <div class="progress-card ${isComplete ? 'complete' : ''}" onclick="window.location.hash='${href}'">
+            <div class="progress-card ${isComplete ? 'complete' : ''}" data-href="${href}" role="link" tabindex="0">
                 <div class="progress-card-left">
                     <div class="progress-card-icon">${r.route.icon || '🚀'}</div>
                     <div class="progress-card-info">
@@ -119,6 +120,13 @@ export default class LearningView {
                 </div>
             </div>
         `;
+    }
+
+    mounted() {
+        const root = document.querySelector('.view-learning');
+        if (!root) return;
+
+        bindHashNavigation(root);
     }
 
     getMotivation(percent) {

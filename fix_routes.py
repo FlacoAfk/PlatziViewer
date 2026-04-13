@@ -15,7 +15,7 @@ class MarkdownManager:
     def __init__(self, filename):
         self.filename = filename
         try:
-            with open(filename, "r", encoding="utf-8") as f:
+            with open(filename, encoding="utf-8") as f:
                 self.lines = f.read().splitlines()
         except FileNotFoundError:
             print(f"❌ Error: Archivo '{filename}' no encontrado.")

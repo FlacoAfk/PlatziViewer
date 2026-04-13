@@ -2,6 +2,10 @@ export const API_URL = window.location?.origin || 'http://localhost:8080';
 const RETRY_DELAY_MS = 1200;
 const DEFAULT_TIMEOUT_MS = 12000;
 
+// FFmpeg availability — used for compatibility fallback only.
+let _ffmpegAvailable = null;
+const _repairedCache = new Map();
+
 export class ApiService {
     static _buildError(code, cause = null) {
         const error = new Error(code);
@@ -39,6 +43,89 @@ export class ApiService {
         return encodeURIComponent(value);
     }
 
+    /**
+     * Detect ffmpeg availability from the server. Called once at startup;
+     * result is cached so subsequent calls are instant.
+     */
+    static async detectFfmpeg() {
+        if (_ffmpegAvailable !== null) return _ffmpegAvailable;
+        try {
+            const health = await this.getHealth();
+            _ffmpegAvailable = !!health?.ffmpeg?.available;
+        } catch {
+            _ffmpegAvailable = false;
+        }
+        console.log(`[A/V] FFmpeg ${_ffmpegAvailable ? 'disponible \u2192 video remux activo' : 'no disponible \u2192 video raw'}`);
+        return _ffmpegAvailable;
+    }
+
+    static _isCompletedRepair(payload) {
+        return payload?.status === 'completed' && !!payload?.artifactPath;
+    }
+
+    static rememberRepairedArtifact(fileId, payload = null) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return false;
+        if (payload && !this._isCompletedRepair(payload)) return false;
+        _repairedCache.set(safeRef, {
+            status: 'completed',
+            artifactPath: payload?.artifactPath || `repaired_videos/${decodeURIComponent(safeRef)}.mp4`,
+            updatedAt: Date.now(),
+        });
+        return true;
+    }
+
+    static getRepairedVideoUrl(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return '';
+        return `${API_URL}/api/repaired/${safeRef}`;
+    }
+
+    static async requestRepair(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) throw this._buildError('repair_invalid_file_id');
+
+        const response = await this._fetchWithTimeout(
+            `${API_URL}/api/repair/${safeRef}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            },
+            12000
+        );
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw this._buildError(`repair_http_${response.status}`, payload);
+        }
+
+        if (this._isCompletedRepair(payload)) {
+            this.rememberRepairedArtifact(fileId, payload);
+        }
+        return payload;
+    }
+
+    static async getRepairStatus(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) throw this._buildError('repair_invalid_file_id');
+
+        const response = await this._fetchWithTimeout(
+            `${API_URL}/api/repair-status/${safeRef}`,
+            { cache: 'no-store' },
+            8000
+        );
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw this._buildError(`repair_status_http_${response.status}`, payload);
+        }
+
+        if (this._isCompletedRepair(payload)) {
+            this.rememberRepairedArtifact(fileId, payload);
+        }
+        return payload;
+    }
+
     static async getCourses(retries = 5) {
         let lastError = null;
         for (let i = 0; i < retries; i++) {
@@ -51,11 +138,11 @@ export class ApiService {
                 if (!response.ok) throw this._buildError(`courses_http_${response.status}`);
                 const data = await response.json();
                 if (data?.categories?.length > 0) {
-                    console.log('📦 Data loaded:', data.stats);
+                    console.log('\ud83d\udce6 Data loaded:', data.stats);
                     return data;
                 }
 
-                console.log(`⏳ Waiting for data... (${i + 1}/${retries})`);
+                console.log(`\u231b Waiting for data... (${i + 1}/${retries})`);
                 lastError = this._buildError('courses_empty');
                 await this._wait(RETRY_DELAY_MS);
             } catch (error) {
@@ -81,7 +168,7 @@ export class ApiService {
 
                 const data = await response.json();
                 if (data?.categories?.length > 0) {
-                    console.log('🚀 Bootstrap loaded:', data.stats);
+                    console.log('\ud83d\ude80 Bootstrap loaded:', data.stats);
                     return data;
                 }
 
@@ -167,7 +254,46 @@ export class ApiService {
         }
     }
 
+    static async getVideoMetadata(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return null;
+        try {
+            const response = await this._fetchWithTimeout(
+                `${API_URL}/api/video-metadata/${safeRef}`,
+                { cache: 'force-cache' }, // safe to cache
+                12000
+            );
+            if (!response.ok) return null;
+            const data = await response.json();
+            return data?.metadata || null;
+        } catch (error) {
+            console.warn('[API] Error fetching video metadata:', error);
+            return null;
+        }
+    }
+
     static getVideoUrl(fileId) {
+        const safeRef = this._normalizeDriveRef(fileId);
+        if (!safeRef) return '';
+
+        // Two-Stage Playback priority:
+        // 1) repaired artifact (sync + seek)
+        // 2) compat stream (sync, non-seekable while repair runs)
+        // 3) raw Drive fallback
+        if (_repairedCache.has(safeRef)) {
+            return this.getRepairedVideoUrl(fileId);
+        }
+
+        // Compat is the default unless ffmpeg was explicitly detected as unavailable.
+        if (_ffmpegAvailable !== false) {
+            return this.getCompatibleVideoUrl(fileId);
+        }
+
+        return `${API_URL}/drive/files/${safeRef}`;
+    }
+
+    /** Always returns the raw Drive URL (for downloads, VLC, etc.) */
+    static getVideoUrlRaw(fileId) {
         const safeRef = this._normalizeDriveRef(fileId);
         if (!safeRef) return '';
         return `${API_URL}/drive/files/${safeRef}`;

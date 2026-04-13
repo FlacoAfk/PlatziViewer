@@ -1,4 +1,10 @@
 import { state } from '../services/state.js';
+import {
+    bindAccordionToggles,
+    bindHashNavigation,
+    bindStoredTextareas,
+    safeGetLocalStorage,
+} from '../utils/view-helpers.js';
 
 export default class CourseView {
     constructor(params) {
@@ -41,7 +47,7 @@ export default class CourseView {
 
         // Notes key
         const notesKey = `platzi_notes_${this.catIdx}_${this.routeIdx}_${this.courseIdx}`;
-        const savedNotes = localStorage.getItem(notesKey) || '';
+        const savedNotes = safeGetLocalStorage(notesKey, '');
 
         return `
             <div class="view-course fade-in">
@@ -112,33 +118,12 @@ export default class CourseView {
 
                         <!-- Module Resources -->
                         <div class="sidebar-panel panel-resources">
-                            <h3 class="panel-title">🔗 Recursos del Módulo</h3>
+                            <h3 class="panel-title">🔗 Recursos del Curso</h3>
                             <div class="resource-list">
-                                <a href="https://developer.mozilla.org/es/docs/Web/HTTP" target="_blank" rel="noopener" class="resource-link">
-                                    <span class="resource-icon">🌐</span>
-                                    <span class="resource-text">MDN — HTTP Docs</span>
-                                    <span class="resource-arrow">↗</span>
-                                </a>
-                                <a href="https://www.postman.com/downloads/" target="_blank" rel="noopener" class="resource-link">
-                                    <span class="resource-icon">🚀</span>
-                                    <span class="resource-text">Descargar Postman</span>
-                                    <span class="resource-arrow">↗</span>
-                                </a>
-                                <a href="https://restfulapi.net/" target="_blank" rel="noopener" class="resource-link">
-                                    <span class="resource-icon">📡</span>
-                                    <span class="resource-text">REST API Tutorial</span>
-                                    <span class="resource-arrow">↗</span>
-                                </a>
-                                <a href="https://nodejs.org/es/docs" target="_blank" rel="noopener" class="resource-link">
-                                    <span class="resource-icon">💚</span>
-                                    <span class="resource-text">Node.js Docs</span>
-                                    <span class="resource-arrow">↗</span>
-                                </a>
-                                <a href="https://devdocs.io/" target="_blank" rel="noopener" class="resource-link">
-                                    <span class="resource-icon">📚</span>
-                                    <span class="resource-text">DevDocs.io</span>
-                                    <span class="resource-arrow">↗</span>
-                                </a>
+                                <div class="resource-link" style="cursor: default;">
+                                    <span class="resource-icon">📦</span>
+                                    <span class="resource-text">Los recursos específicos aparecen dentro de cada clase cuando están disponibles.</span>
+                                </div>
                             </div>
                         </div>
 
@@ -149,7 +134,7 @@ export default class CourseView {
                                 class="notes-textarea"
                                 id="course-notes"
                                 placeholder="Escribe tus notas, snippets de código, o ideas aquí..."
-                                oninput="localStorage.setItem('${notesKey}', this.value)"
+                                data-storage-key="${notesKey}"
                             >${savedNotes}</textarea>
                             <div class="notes-footer">
                                 <span class="notes-hint">💾 Guardado automático en tu navegador</span>
@@ -173,7 +158,7 @@ export default class CourseView {
 
             return `
                 <div class="module-item" id="cmod-${modIdx}">
-                    <div class="module-header" onclick="document.getElementById('cmod-${modIdx}').classList.toggle('active')">
+                    <div class="module-header" data-toggle-target="cmod-${modIdx}" role="button" tabindex="0">
                         <div class="module-header-left">
                             <span class="module-num">${pct === 100 ? '✅' : modIdx + 1}</span>
                             <h3>${mod.name}</h3>
@@ -195,7 +180,7 @@ export default class CourseView {
                 const typeClass = cls.hasVideo ? 'type-video' : cls.hasHtml ? 'type-html' : 'type-text';
 
                 return `
-                                <div class="class-card ${status} ${hasVideo ? 'clickable' : ''}" onclick="${hasVideo ? `window.location.hash='#player/${this.catIdx}/${this.routeIdx}/${this.courseIdx}/${modIdx}/${classIdx}'` : ''}">
+                                <div class="class-card ${status} ${hasVideo ? 'clickable' : ''}" ${hasVideo ? `data-href="#player/${this.catIdx}/${this.routeIdx}/${this.courseIdx}/${modIdx}/${classIdx}" role="link" tabindex="0"` : ''}>
                                     <div class="class-card-left">
                                         <span class="class-num ${status}">${status === 'complete' ? '✓' : classIdx + 1}</span>
                                         <div class="class-info">
@@ -215,6 +200,15 @@ export default class CourseView {
                 </div>
             `;
         }).join('');
+    }
+
+    mounted() {
+        const root = document.querySelector('.view-course');
+        if (!root) return;
+
+        bindHashNavigation(root);
+        bindAccordionToggles(root);
+        bindStoredTextareas(root);
     }
 
     getFirstPlayableClass() {

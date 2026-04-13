@@ -1,4 +1,8 @@
 export class Card {
+    static _navigationAttrs(hash) {
+        return `data-href="${hash}" role="link" tabindex="0"`;
+    }
+
     /**
      * Renders a route card for the home grid.
      * @param {Object} route - Route data from API
@@ -23,7 +27,7 @@ export class Card {
         const availabilityClass = hasAll ? 'route-complete' : (hasSome ? 'route-partial' : 'route-empty');
 
         return `
-            <div class="route-card ${availabilityClass}" onclick="window.location.hash='#route/${catIdx}/${routeIdx}'">
+            <div class="route-card ${availabilityClass}" ${this._navigationAttrs(`#route/${catIdx}/${routeIdx}`)}>
                 <div class="route-icon">${typeIcon}</div>
                 <h3 class="route-title">${route.name}</h3>
                 <p class="route-desc">
@@ -50,7 +54,7 @@ export class Card {
         const badge = isAvailable ? '' : '<span class="badge-unavailable">No disponible</span>';
 
         return `
-            <div class="course-card ${availClass}" ${isAvailable ? `onclick="window.location.hash='#course/${catIdx}/${routeIdx}/${courseIdx}'"` : ''}>
+            <div class="course-card ${availClass}" ${isAvailable ? this._navigationAttrs(`#course/${catIdx}/${routeIdx}/${courseIdx}`) : ''}>
                 <div class="course-thumbnail">
                     <div class="thumbnail-placeholder">${isAvailable ? '📖' : '📕'}</div>
                 </div>

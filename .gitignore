@@ -58,6 +58,9 @@ root_id.txt
 *.temp
 .cache/
 node_modules/
+.eslintcache
+.ruff_cache/
+.stylelintcache
 
 # Progress data (personal)
 progress.json
@@ -126,3 +129,5 @@ venv.bak/
 *.backup
 *.old
 runtime-data/
+repair_state.json
+repaired_videos/

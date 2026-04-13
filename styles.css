@@ -4,7 +4,7 @@
     --bg-secondary: #12121a;
     --bg-card: #1a1a25;
     --bg-card-hover: #22222f;
-    --text-primary: #ffffff;
+    --text-primary: #fff;
     --text-secondary: #a0a0b0;
     --text-muted: #606070;
     --accent-primary: #00d68f;
@@ -1154,7 +1154,7 @@ a {
     top: 0;
     left: 0;
     height: 100%;
-    background: #ff0000;
+    background: #f00;
     border-radius: 2px;
     pointer-events: none;
 }
@@ -1165,7 +1165,7 @@ a {
     transform: translate(-50%, -50%) scale(0);
     width: 14px;
     height: 14px;
-    background: #ff0000;
+    background: #f00;
     border-radius: 50%;
     transition: transform 0.15s ease;
     pointer-events: none;
@@ -1223,7 +1223,7 @@ a {
 }
 
 .yt-cc-active {
-    color: #ff0000;
+    color: #f00;
     position: relative;
 }
 
@@ -1234,7 +1234,7 @@ a {
     left: 8px;
     right: 8px;
     height: 2px;
-    background: #ff0000;
+    background: #f00;
     border-radius: 1px;
 }
 
@@ -2459,7 +2459,6 @@ a.rf-name:hover {
 
 .ring-fill-lg {
     fill: none;
-    stroke: url(#progressGradient);
     stroke: var(--accent-primary);
     stroke-width: 8;
     stroke-linecap: round;

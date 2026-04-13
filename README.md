@@ -292,6 +292,25 @@ Esto aumenta uso de CPU, pero suele estabilizar archivos con timestamps dañados
 
 ## 🛠️ Instalación y Configuración
 
+### Calidad y pruebas
+
+Una vez creado el entorno virtual y antes de tocar código, instala el tooling de validación:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+npm install
+```
+
+Comandos disponibles:
+
+```powershell
+npm run test
+npm run test:frontend:smoke
+npm run lint
+npm run lint:fix
+npm run format
+```
+
 ## 🧳 Crear .exe Portable (Windows)
 
 No necesitas Docker para generar el ejecutable en Windows.

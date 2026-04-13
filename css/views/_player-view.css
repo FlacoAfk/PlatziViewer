@@ -221,7 +221,7 @@
     top: 0;
     left: 0;
     height: 100%;
-    background: #ff0000;
+    background: #f00;
     border-radius: 2px;
     pointer-events: none;
 }
@@ -232,7 +232,7 @@
     transform: translate(-50%, -50%) scale(0);
     width: 14px;
     height: 14px;
-    background: #ff0000;
+    background: #f00;
     border-radius: 50%;
     transition: transform 0.15s ease;
     pointer-events: none;
@@ -290,7 +290,7 @@
 }
 
 .yt-cc-active {
-    color: #ff0000;
+    color: #f00;
     position: relative;
 }
 
@@ -301,7 +301,7 @@
     left: 8px;
     right: 8px;
     height: 2px;
-    background: #ff0000;
+    background: #f00;
     border-radius: 1px;
 }
 

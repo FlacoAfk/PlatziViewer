@@ -11,8 +11,8 @@ filesystem to populate modules/classes with local file paths.
 """
 
 import json
-import re
 import os
+import re
 
 # Import the parser
 import parse_routes
@@ -41,7 +41,7 @@ def sanitize_for_match(name):
 def load_drive_courses():
     """Load the list of Drive folder names from DriveCourses.md."""
     courses = []
-    with open(DRIVE_COURSES_FILE, "r", encoding="utf-8") as f:
+    with open(DRIVE_COURSES_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line.startswith("- "):
@@ -54,7 +54,7 @@ def load_old_cache():
     if not os.path.exists(CACHE_FILE):
         return {}
 
-    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+    with open(CACHE_FILE, encoding="utf-8") as f:
         data = json.load(f)
 
     # Build lookup: sanitized course name -> course data (with modules)
@@ -160,7 +160,7 @@ def scan_local_classes(module_path):
         return "local:" + module_rel.replace("\\", "/") + "/" + filename
 
     # Viewable extensions (opened inline in browser)
-    VIEWABLE_EXT = {
+    viewable_ext = {
         ".html",
         ".pdf",
         ".png",
@@ -203,7 +203,7 @@ def scan_local_classes(module_path):
                     # Clean display name: remove leading number and hash suffix
                     display = f.split(". ", 1)[-1] if ". " in f else f
                     resources.append(
-                        {"name": display, "file": local_ref(f), "ext": ext, "viewable": ext in VIEWABLE_EXT}
+                        {"name": display, "file": local_ref(f), "ext": ext, "viewable": ext in viewable_ext}
                     )
 
         if video:
@@ -259,11 +259,9 @@ def scan_local_course(course_folder_name):
     except Exception:
         return modules, has_presentation
 
-    has_subdirs = False
     for item in items:
         item_path = os.path.join(course_path, item)
         if os.path.isdir(item_path) and not item.startswith(".") and item != "desktop.ini":
-            has_subdirs = True
             classes = scan_local_classes(item_path)
             name = item.split(". ", 1)[-1] if ". " in item else item
             modules.append({"name": name, "folderName": item, "classes": classes, "classCount": len(classes)})
@@ -411,7 +409,7 @@ def main():
     file_size = os.path.getsize(OUTPUT_FILE)
 
     print(f"\n{'=' * 60}")
-    print(f"✅ Cache rebuilt!")
+    print("✅ Cache rebuilt!")
     print(f"   Categories:     {len(categories)}")
     print(f"   Routes:         {total_routes}")
     print(f"   Course entries: {total_courses}")

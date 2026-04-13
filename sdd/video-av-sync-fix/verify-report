@@ -1,0 +1,101 @@
+## Verification Report
+
+**Change**: video-av-sync-fix
+**Mode**: Standard
+**Artifact source status**: Partial — `proposal`, `spec`, `design`, `apply-progress`, and `tasks` were not available in repo or Engram during this verification. Static/design checks below were reconstructed from the launch context plus `video-av-sync-fix/exploration.md`.
+
+---
+
+### Completeness
+| Metric | Value |
+|--------|-------|
+| Tasks total | N/A |
+| Tasks complete | N/A |
+| Tasks incomplete | N/A |
+
+No task artifact was available, so task-level completeness could not be proven.
+
+---
+
+### Build & Tests Execution
+
+**Build**: ➖ Skipped by instruction (`NO hagas build`).
+
+**Tests**: ✅ 7 passed / ❌ 0 failed / ⚠️ 0 skipped
+
+Command:
+`python tools/run_with_repo_python.py -m pytest tests/test_repair_api.py tests/test_server_cache.py -q`
+
+Output:
+`.......                                                                  [100%]`
+`7 passed in 1.69s`
+
+Frontend smoke:
+`npm run test:frontend:smoke`
+
+Output:
+`frontend smoke ok`
+
+Coverage: ➖ Not available
+
+---
+
+### Spec Compliance Matrix
+
+> Requirement names are inferred from the verification context because the spec artifact was unavailable.
+
+| Requirement | Scenario | Test | Result |
+|-------------|----------|------|--------|
+| REQ-01 Explicit repair workflow | POST repair starts/returns lifecycle state and status endpoint reaches `completed` | `tests/test_repair_api.py > test_repair_trigger_and_status_complete` | ✅ COMPLIANT |
+| REQ-02 Seekable repaired artifact | Repaired artifact serves byte ranges with `206`, `Accept-Ranges: bytes`, and `Content-Range` | `tests/test_repair_api.py > test_repaired_video_supports_range_requests` | ✅ COMPLIANT |
+| REQ-03 Default playback prefers repaired artifact, otherwise raw Drive | `ApiService.getVideoUrl()` returns repaired URL when cached, else raw Drive URL | Static only (`js/services/api.js`) | ⚠️ PARTIAL |
+| REQ-04 Player can request repair, poll status, and auto-switch to repaired source | Repair button triggers request, polling updates badge, completed repair swaps source preserving playback time | Static only (`js/views/player.js`) | ⚠️ PARTIAL |
+| REQ-05 Repair state/cleanup retained on server | Repair state persisted to `repair_state.json`, artifacts cleaned by retention/size policy | Static only (`server.py`) | ⚠️ PARTIAL |
+
+**Compliance summary**: 2/5 scenarios runtime-proven, 3/5 only statically evidenced due missing artifact/test coverage.
+
+---
+
+### Correctness (Static — Structural Evidence)
+| Requirement | Status | Notes |
+|------------|--------|-------|
+| Async repair API exists | ✅ Implemented | `server.py` adds `POST /api/repair/{id}` and `GET /api/repair-status/{id}` with validation, lock handling, worker thread, and persisted state. |
+| Repaired artifact endpoint is seekable | ✅ Implemented | `GET /api/repaired/{id}` parses single ranges and returns `206`/`200` with `Accept-Ranges: bytes`. |
+| Frontend prefers repaired over raw | ✅ Implemented | `ApiService.getVideoUrl()` checks `_repairedCache` first, then falls back to `/drive/files/{id}`. |
+| Player repair UX exists | ✅ Implemented | `player.js` adds repair button, badge, polling, and `_switchToRepairedSource()`. |
+| Artifact/state cleanup | ✅ Implemented | `.gitignore` ignores `repair_state.json` and `repaired_videos/`; server cleanup enforces disk cap and stale failure retention. |
+
+---
+
+### Coherence (Design)
+| Decision | Followed? | Notes |
+|----------|-----------|-------|
+| Hybrid approach: raw Drive by default, repaired artifact only when needed | ✅ Yes | `ApiService.getVideoUrl()` now defaults to raw Drive and only switches to repaired artifacts when known/polled. |
+| Seekable repaired artifact instead of live-style compat stream | ✅ Yes | `/api/repaired/{id}` serves file-backed MP4 with byte-range support. |
+| Background/on-demand repair generation | ✅ Yes | `POST /api/repair/{id}` creates async worker + persisted status. |
+| Basic lifecycle management for artifacts | ✅ Yes | Server initializes persisted state, recovers artifacts, evicts by size, and clears stale failures/locks. |
+
+---
+
+### Issues Found
+
+**CRITICAL**
+- None.
+
+**WARNING**
+- The SDD source artifacts (`proposal`, `spec`, `design`, `apply-progress`, `tasks`) were not available during verification, so full requirement-by-requirement compliance could not be proven from authoritative documents.
+- The real FFmpeg repair path is not exercised by current tests. `tests/test_repair_api.py` monkeypatches `_repair_video_file()`, so command construction, Drive fetch integration, and actual artifact generation are not runtime-verified.
+- `_repair_video_file()` builds its internal source URL with the module-level `PORT` constant (`server.py`), which is fine for the normal fixed-port app flow but can diverge from the actual bound port in dynamic-port/integration test environments.
+- There is no frontend behavioral test covering the repair button, polling loop, badge states, or automatic source swap; current frontend evidence is smoke-only.
+
+**SUGGESTION**
+- Add an integration-focused backend test that verifies the FFmpeg invocation path or makes the repair source base URL injectable from the bound server instance.
+- Add frontend tests for repair UX states: pending, in-progress, completed auto-switch, and failed repair recovery.
+- Persist repaired-artifact discovery across reloads (if product wants instant reuse without initial polling on player mount).
+
+---
+
+### Verdict
+PASS WITH WARNINGS
+
+The implementation matches the intended hybrid repaired-artifact strategy and the exercised backend/frontend checks pass, but verification confidence is reduced by missing SDD artifacts and limited runtime coverage of the real FFmpeg + frontend repair flows.

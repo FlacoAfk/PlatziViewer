@@ -31,7 +31,6 @@ export class Router {
     async handleRoute() {
         const hash = window.location.hash || '#home';
 
-        let match = null;
         let route = null;
         let params = {};
 
@@ -43,7 +42,6 @@ export class Router {
             const found = hash.match(regex);
 
             if (found) {
-                match = found;
                 route = viewClass;
                 // Extract param names and values
                 const paramNames = (path.match(/:[^\s/]+/g) || []).map(n => n.slice(1));

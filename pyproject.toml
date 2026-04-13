@@ -7,6 +7,13 @@ exclude = [".git", "node_modules", "venv", ".venv", "env"]
 select = ["E", "F", "W", "I", "C90", "N", "B", "A", "UP"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"desktop_app.py" = ["C901", "I001", "W291"]
+"drive_service.py" = ["I001"]
+"rebuild_cache.py" = ["C901"]
+"rebuild_cache_drive.py" = ["C901"]
+"server.py" = ["A002", "C901", "E722", "I001", "N802", "UP015", "UP038"]
+
 [tool.black]
 line-length = 120
 target-version = ['py310']

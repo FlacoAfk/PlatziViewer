@@ -47,7 +47,7 @@ def setup_dirs():
 
 
 def parse_css():
-    with open("styles.css", "r", encoding="utf-8") as f:
+    with open("styles.css", encoding="utf-8") as f:
         content = f.read()
 
     # Split using the headers

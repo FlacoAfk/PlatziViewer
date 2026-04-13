@@ -5,6 +5,7 @@ Course structure is loaded from courses_cache.json (built by rebuild_cache_drive
 """
 
 import os
+import sys
 import json
 import re
 import errno
@@ -16,6 +17,9 @@ import threading
 import time
 import subprocess
 import shutil
+from pathlib import Path
+
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIEWER_PATH = os.environ.get("PLATZI_VIEWER_PATH", BASE_DIR)
@@ -73,6 +77,396 @@ compat_stream_stats = {
     "lastAt": None,
 }
 
+REPAIRED_VIDEOS_DIR = os.path.join(DATA_PATH, "repaired_videos")
+REPAIR_STATE_FILE = os.path.join(DATA_PATH, "repair_state.json")
+REPAIR_MAX_MB = max(100, int(os.environ.get("PLATZI_REPAIRED_MAX_MB", "5000")))
+REPAIR_LOCK_TTL_SECONDS = max(300, int(os.environ.get("PLATZI_REPAIR_LOCK_TTL_SECONDS", "1800")))
+REPAIR_FAILED_RETENTION_SECONDS = int(os.environ.get("PLATZI_REPAIR_FAILED_RETENTION_SECONDS", str(7 * 24 * 3600)))
+
+repair_state_lock = threading.Lock()
+repair_state = {}
+active_repairs = {}
+
+
+def _now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _repair_paths(file_id):
+    safe_file_id = str(file_id or "").strip()
+    base = os.path.abspath(REPAIRED_VIDEOS_DIR)
+    artifact = os.path.abspath(os.path.join(base, f"{safe_file_id}.mp4"))
+    meta = os.path.abspath(os.path.join(base, f"{safe_file_id}.meta.json"))
+    lock = os.path.abspath(os.path.join(base, f"{safe_file_id}.lock"))
+    return artifact, meta, lock
+
+
+def _is_within_directory(path_value, directory):
+    try:
+        abs_path = os.path.abspath(path_value)
+        abs_dir = os.path.abspath(directory)
+        common = os.path.commonpath([abs_path, abs_dir])
+        return common == abs_dir
+    except Exception:
+        return False
+
+
+def _persist_repair_state_locked():
+    state_dir = os.path.dirname(REPAIR_STATE_FILE)
+    if state_dir:
+        os.makedirs(state_dir, exist_ok=True)
+
+    temp_path = f"{REPAIR_STATE_FILE}.tmp"
+    payload = {
+        "updatedAt": _now_iso(),
+        "repairs": repair_state,
+    }
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(temp_path, REPAIR_STATE_FILE)
+
+
+def _load_repair_state():
+    if not os.path.exists(REPAIR_STATE_FILE):
+        return {}
+    try:
+        with open(REPAIR_STATE_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        repairs = payload.get("repairs") if isinstance(payload, dict) else payload
+        if isinstance(repairs, dict):
+            return repairs
+    except Exception as error:
+        print(f"[WARN] Could not load repair state: {error}")
+    return {}
+
+
+def _is_artifact_ready(file_id):
+    artifact_path, meta_path, _ = _repair_paths(file_id)
+    if not _is_within_directory(artifact_path, REPAIRED_VIDEOS_DIR):
+        return False
+    if not os.path.exists(artifact_path) or os.path.getsize(artifact_path) <= 0:
+        return False
+    if not os.path.exists(meta_path):
+        return False
+    return True
+
+
+def _set_repair_state(file_id, **updates):
+    with repair_state_lock:
+        entry = dict(repair_state.get(file_id) or {})
+        entry.setdefault("fileId", file_id)
+        entry.setdefault("requestedAt", _now_iso())
+        entry.update(updates)
+        repair_state[file_id] = entry
+        _persist_repair_state_locked()
+        return dict(entry)
+
+
+def _repair_health_summary():
+    with repair_state_lock:
+        entries = list(repair_state.values())
+
+    total = len(entries)
+    completed = sum(1 for item in entries if item.get("status") == "completed")
+    failed = sum(1 for item in entries if item.get("status") == "failed")
+    in_progress = sum(1 for item in entries if item.get("status") == "in_progress")
+    pending = sum(1 for item in entries if item.get("status") == "pending")
+
+    disk_bytes = 0
+    try:
+        base = Path(REPAIRED_VIDEOS_DIR)
+        if base.exists():
+            for item in base.glob("*.mp4"):
+                try:
+                    disk_bytes += item.stat().st_size
+                except OSError:
+                    continue
+    except Exception:
+        pass
+
+    return {
+        "totalRepairs": total,
+        "successfulRepairs": completed,
+        "failedRepairs": failed,
+        "inProgress": in_progress,
+        "pending": pending,
+        "diskUsageMB": round(disk_bytes / (1024 * 1024), 2),
+        "diskLimitMB": REPAIR_MAX_MB,
+    }
+
+
+def _cleanup_old_failed_states_locked(now_epoch):
+    removed_any = False
+    for file_id in list(repair_state.keys()):
+        entry = repair_state.get(file_id) or {}
+        if entry.get("status") != "failed":
+            continue
+        failed_at = entry.get("failedAt") or entry.get("updatedAt") or entry.get("startedAt")
+        if not failed_at:
+            continue
+        try:
+            failed_epoch = time.mktime(time.strptime(failed_at, "%Y-%m-%dT%H:%M:%SZ"))
+        except Exception:
+            continue
+        if now_epoch - failed_epoch > REPAIR_FAILED_RETENTION_SECONDS:
+            del repair_state[file_id]
+            removed_any = True
+    return removed_any
+
+
+def _cleanup_repaired_artifacts():
+    os.makedirs(REPAIRED_VIDEOS_DIR, exist_ok=True)
+    max_bytes = REPAIR_MAX_MB * 1024 * 1024
+
+    files = []
+    total_bytes = 0
+    for item in Path(REPAIRED_VIDEOS_DIR).glob("*.mp4"):
+        try:
+            stats = item.stat()
+        except OSError:
+            continue
+        total_bytes += stats.st_size
+        files.append((stats.st_mtime, stats.st_size, item))
+
+    if total_bytes > max_bytes:
+        files.sort(key=lambda pair: pair[0])
+        for _, size, path_obj in files:
+            if total_bytes <= max_bytes:
+                break
+            file_id = path_obj.stem
+            meta_path = Path(REPAIRED_VIDEOS_DIR) / f"{file_id}.meta.json"
+            try:
+                path_obj.unlink(missing_ok=True)
+                meta_path.unlink(missing_ok=True)
+                total_bytes -= size
+            except OSError:
+                continue
+
+            with repair_state_lock:
+                if file_id in repair_state:
+                    entry = dict(repair_state[file_id])
+                    entry["status"] = "evicted"
+                    entry["updatedAt"] = _now_iso()
+                    entry["error"] = "artifact_evicted_by_cleanup"
+                    repair_state[file_id] = entry
+                    _persist_repair_state_locked()
+
+    now_epoch = time.time()
+    with repair_state_lock:
+        if _cleanup_old_failed_states_locked(now_epoch):
+            _persist_repair_state_locked()
+
+
+def _init_repair_system():
+    os.makedirs(REPAIRED_VIDEOS_DIR, exist_ok=True)
+    loaded = _load_repair_state()
+    with repair_state_lock:
+        repair_state.clear()
+        if isinstance(loaded, dict):
+            repair_state.update(loaded)
+
+    # Recover statuses for artifacts that already exist in disk.
+    for artifact in Path(REPAIRED_VIDEOS_DIR).glob("*.mp4"):
+        file_id = artifact.stem
+        if not _is_artifact_ready(file_id):
+            continue
+        size = 0
+        try:
+            size = artifact.stat().st_size
+        except OSError:
+            pass
+        _set_repair_state(
+            file_id,
+            status="completed",
+            completedAt=_now_iso(),
+            updatedAt=_now_iso(),
+            progress=1.0,
+            error=None,
+            artifactPath=f"repaired_videos/{file_id}.mp4",
+            artifactSize=size,
+            ffmpegMode="remux_audio",
+        )
+
+    # Remove stale locks.
+    now_epoch = time.time()
+    for lock_file in Path(REPAIRED_VIDEOS_DIR).glob("*.lock"):
+        try:
+            age = now_epoch - lock_file.stat().st_mtime
+            if age > REPAIR_LOCK_TTL_SECONDS:
+                lock_file.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+    _cleanup_repaired_artifacts()
+
+
+def _parse_single_range(range_header, total_size):
+    if not range_header:
+        return None
+    text = str(range_header).strip()
+    if "," in text or not text.startswith("bytes="):
+        raise ValueError("invalid_range")
+    value = text[6:].strip()
+    if "-" not in value:
+        raise ValueError("invalid_range")
+    start_text, end_text = value.split("-", 1)
+    if start_text == "" and end_text == "":
+        raise ValueError("invalid_range")
+
+    if start_text == "":
+        length = int(end_text)
+        if length <= 0:
+            raise ValueError("invalid_range")
+        if length >= total_size:
+            return 0, total_size - 1
+        return total_size - length, total_size - 1
+
+    start = int(start_text)
+    end = total_size - 1 if end_text == "" else int(end_text)
+    if start < 0 or end < 0 or start > end or start >= total_size:
+        raise ValueError("range_not_satisfiable")
+    end = min(end, total_size - 1)
+    return start, end
+
+
+def _repair_video_file(file_id, output_path, server_port):
+    ffmpeg_executable = _get_ffmpeg_executable()
+    if not ffmpeg_executable:
+        raise RuntimeError("ffmpeg_not_available")
+
+    source_url = f"http://127.0.0.1:{server_port}/drive/files/{file_id}?raw=1"
+    cmd = [
+        ffmpeg_executable,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-fflags",
+        "+genpts+igndts+discardcorrupt",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-i",
+        source_url,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-ar",
+        "48000",
+        "-af",
+        "aresample=async=1:min_hard_comp=0.100:first_pts=0",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        output_path,
+    ]
+
+    completed = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=60 * 60 * 2,
+        check=False,
+        creationflags=CREATE_NO_WINDOW,
+    )
+
+    if completed.returncode != 0:
+        stderr_text = (completed.stderr or b"").decode("utf-8", errors="ignore").strip()
+        detail = stderr_text[:300] if stderr_text else f"ffmpeg_exit_{completed.returncode}"
+        raise RuntimeError(f"ffmpeg_failed:{detail}")
+
+    return {
+        "ffmpegMode": "remux_audio",
+        "artifactSize": os.path.getsize(output_path),
+    }
+
+
+def _repair_worker(file_id, server_port):
+    artifact_path, meta_path, lock_path = _repair_paths(file_id)
+    try:
+        _set_repair_state(
+            file_id,
+            status="in_progress",
+            startedAt=_now_iso(),
+            updatedAt=_now_iso(),
+            progress=0.05,
+            error=None,
+            artifactPath=f"repaired_videos/{file_id}.mp4",
+            artifactSize=0,
+            ffmpegMode="pending",
+        )
+
+        result = _repair_video_file(file_id, artifact_path, server_port)
+
+        meta_payload = {
+            "fileId": file_id,
+            "ffmpegMode": result.get("ffmpegMode", "remux_audio"),
+            "fileSize": _safe_int(result.get("artifactSize"), default=os.path.getsize(artifact_path)),
+            "repairedAt": _now_iso(),
+        }
+        with open(meta_path, "w", encoding="utf-8") as meta_file:
+            json.dump(meta_payload, meta_file, ensure_ascii=False)
+
+        _set_repair_state(
+            file_id,
+            status="completed",
+            completedAt=_now_iso(),
+            updatedAt=_now_iso(),
+            progress=1.0,
+            error=None,
+            artifactPath=f"repaired_videos/{file_id}.mp4",
+            artifactSize=meta_payload["fileSize"],
+            ffmpegMode=meta_payload["ffmpegMode"],
+        )
+
+        _cleanup_repaired_artifacts()
+
+    except Exception as error:
+        _set_repair_state(
+            file_id,
+            status="failed",
+            failedAt=_now_iso(),
+            updatedAt=_now_iso(),
+            progress=0.0,
+            error=str(error),
+            artifactPath=f"repaired_videos/{file_id}.mp4",
+            ffmpegMode="failed",
+        )
+        try:
+            os.remove(artifact_path)
+        except OSError:
+            pass
+        try:
+            os.remove(meta_path)
+        except OSError:
+            pass
+    finally:
+        with repair_state_lock:
+            active_repairs.pop(file_id, None)
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
+
 
 def _get_ffmpeg_executable():
     global _ffmpeg_executable, _ffmpeg_checked
@@ -89,11 +483,23 @@ def _get_ffmpeg_executable():
     if which_ffmpeg:
         candidates.append(which_ffmpeg)
 
+    # When running as a frozen PyInstaller .exe, check for ffmpeg next to the
+    # executable and inside the bundled temp directory.
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        candidates.append(os.path.join(exe_dir, "ffmpeg.exe"))
+        candidates.append(os.path.join(exe_dir, "ffmpeg", "ffmpeg.exe"))
+        candidates.append(os.path.join(exe_dir, "ffmpeg", "bin", "ffmpeg.exe"))
+        if hasattr(sys, "_MEIPASS"):
+            candidates.append(os.path.join(sys._MEIPASS, "ffmpeg.exe"))
+            candidates.append(os.path.join(sys._MEIPASS, "ffmpeg", "ffmpeg.exe"))
+
     if os.name == "nt":
         candidates.extend(
             [
                 r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
                 r"C:\ffmpeg\bin\ffmpeg.exe",
+                r"C:\Ffmpeg\bin\ffmpeg.exe",
             ]
         )
 
@@ -116,6 +522,7 @@ def _get_ffmpeg_executable():
                 stderr=subprocess.DEVNULL,
                 timeout=4,
                 check=False,
+                creationflags=CREATE_NO_WINDOW
             )
             if completed.returncode == 0:
                 _ffmpeg_executable = candidate
@@ -240,6 +647,20 @@ def _normalize_stats(stats):
 
 def _payload_to_bytes(payload):
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _load_progress_payload():
+    if not os.path.exists(PROGRESS_FILE):
+        return {}
+
+    try:
+        with open(PROGRESS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        print(f"[WARN] Could not load progress file '{PROGRESS_FILE}': {error}")
+        return {}
+
+    return data if isinstance(data, dict) else {}
 
 
 def _gzip_payload(raw_bytes):
@@ -813,6 +1234,118 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             if not self._is_client_disconnect_error(error):
                 raise
 
+    def _stream_video_via_ffmpeg(self, file_id, ffmpeg_executable):
+        """Stream a Drive video through ffmpeg to fix audio timestamp alignment.
+
+        Re-encodes the audio track with aresample=async=1:first_pts=0 (same as
+        VLC's internal timestamp-correction behaviour) while keeping the video
+        stream as-is (copy).  Falls back to raw streaming on error.
+        """
+        source_url = f"http://127.0.0.1:{PORT}/drive/files/{file_id}?raw=1"
+
+        ffmpeg_cmd = [
+            ffmpeg_executable,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-fflags",
+            "+genpts+discardcorrupt",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-max_interleave_delta",
+            "0",
+            "-i",
+            source_url,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-ar",
+            "48000",
+            "-af",
+            "aresample=async=1:first_pts=0",
+            "-movflags",
+            "+frag_keyframe+empty_moov+default_base_moof",
+            "-muxdelay",
+            "0",
+            "-muxpreload",
+            "0",
+            "-f",
+            "mp4",
+            "-",
+        ]
+
+        process = None
+        try:
+            process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+                creationflags=CREATE_NO_WINDOW
+            )
+
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("Accept-Ranges", "none")
+            self._set_cors_headers()
+            self.end_headers()
+
+            total_bytes = 0
+            start_time = time.time()
+
+            while True:
+                if process.stdout is None:
+                    break
+
+                chunk = process.stdout.read(1024 * 512)
+                if not chunk:
+                    break
+
+                self.wfile.write(chunk)
+                total_bytes += len(chunk)
+
+            return_code = process.wait(timeout=5)
+            duration = max(0.001, time.time() - start_time)
+            speed = (total_bytes / 1024 / 1024) / duration
+
+            if return_code != 0:
+                stderr_output = b""
+                if process.stderr is not None:
+                    try:
+                        stderr_output = process.stderr.read(4096)
+                    except Exception:
+                        pass
+                stderr_text = stderr_output.decode("utf-8", errors="ignore").strip()
+                print(f"[WARN] ffmpeg remux failed ({file_id}): code={return_code} {stderr_text[:300]}")
+            else:
+                print(f"[REMUX] {file_id} | {total_bytes/1024/1024:.2f} MB in {duration:.2f}s ({speed:.2f} MB/s)")
+
+        except OSError as error:
+            if not self._is_client_disconnect_error(error):
+                print(f"[ERROR] Remux stream write error for {file_id}: {error}")
+            return
+        except Exception as error:
+            print(f"[ERROR] Remux stream failed for {file_id}: {error}")
+            if not self.wfile.closed:
+                self._safe_send_error(502, "Failed to stream remuxed video")
+            return
+        finally:
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=1)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+
     def do_GET(self):
         if self.path == "/api/health":
             ds = get_drive_service()
@@ -830,9 +1363,112 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     "path": ffmpeg_executable,
                 },
                 "compatStream": compat_snapshot,
+                "repair": _repair_health_summary(),
             }
             self._send_json(200, payload)
             return
+
+        if self.path.startswith("/api/repair-status/"):
+            file_id = unquote(self.path[len("/api/repair-status/") :]).strip()
+            if not file_id or not DRIVE_ID_RE.match(file_id):
+                self._send_json(400, {"error": "invalid_file_id"})
+                return
+
+            with repair_state_lock:
+                entry = dict(repair_state.get(file_id) or {})
+
+            if not entry:
+                if _is_artifact_ready(file_id):
+                    entry = _set_repair_state(
+                        file_id,
+                        status="completed",
+                        completedAt=_now_iso(),
+                        updatedAt=_now_iso(),
+                        progress=1.0,
+                        error=None,
+                        artifactPath=f"repaired_videos/{file_id}.mp4",
+                        artifactSize=os.path.getsize(_repair_paths(file_id)[0]),
+                        ffmpegMode="remux_audio",
+                    )
+                else:
+                    self._send_json(404, {"error": "repair_not_found", "status": "missing"})
+                    return
+
+            if entry.get("status") == "completed" and _is_artifact_ready(file_id):
+                entry["artifactUrl"] = f"/api/repaired/{file_id}"
+
+            self._send_json(200, entry)
+            return
+
+        if self.path.startswith("/api/repaired/"):
+            file_id = unquote(self.path[len("/api/repaired/") :]).strip()
+            if not file_id or not DRIVE_ID_RE.match(file_id):
+                self._safe_send_error(400, "Invalid file ID")
+                return
+
+            artifact_path, _, _ = _repair_paths(file_id)
+            if not _is_within_directory(artifact_path, REPAIRED_VIDEOS_DIR):
+                self._safe_send_error(400, "Invalid repaired file path")
+                return
+
+            if not _is_artifact_ready(file_id):
+                self._safe_send_error(404, "Repaired artifact not found")
+                return
+
+            try:
+                total_size = os.path.getsize(artifact_path)
+                range_header = self.headers.get("Range")
+                if range_header:
+                    start, end = _parse_single_range(range_header, total_size)
+                    length = end - start + 1
+
+                    self.send_response(206)
+                    self.send_header("Content-Type", "video/mp4")
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
+                    self.send_header("Content-Length", str(length))
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self._set_cors_headers()
+                    self.end_headers()
+
+                    with open(artifact_path, "rb") as f:
+                        f.seek(start)
+                        remaining = length
+                        while remaining > 0:
+                            chunk = f.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            remaining -= len(chunk)
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(total_size))
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self._set_cors_headers()
+                self.end_headers()
+
+                with open(artifact_path, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                return
+
+            except ValueError:
+                self._safe_send_error(416, "Range Not Satisfiable")
+                return
+            except OSError as error:
+                if not self._is_client_disconnect_error(error):
+                    print(f"[ERROR] Repaired stream write error for {file_id}: {error}")
+                return
+            except Exception as error:
+                print(f"[ERROR] Failed to stream repaired video {file_id}: {error}")
+                self._safe_send_error(500, "Failed to stream repaired artifact")
+                return
 
         # API endpoint
         if self.path == "/api/courses":
@@ -922,16 +1558,7 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
         # Cargar progreso desde JSON
         if self.path == "/api/progress":
-            try:
-                if os.path.exists(PROGRESS_FILE):
-                    with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                else:
-                    data = {}
-            except:
-                data = {}
-
-            self._send_json(200, data)
+            self._send_json(200, _load_progress_payload())
             return
 
         # Self-check: validate cache references are Drive IDs (no local refs)
@@ -941,6 +1568,28 @@ class PlatziHandler(SimpleHTTPRequestHandler):
 
             report = analyze_drive_references(data)
             self._send_json(200, report)
+            return
+
+        # Get video metadata (including duration)
+        if self.path.startswith("/api/video-metadata/"):
+            if not self._is_local_client():
+                self._send_json(403, {"error": "forbidden"})
+                return
+            file_id = unquote(self.path[len("/api/video-metadata/") :])
+            if not file_id or not DRIVE_ID_RE.match(file_id):
+                self._send_json(400, {"error": "Invalid file ID"})
+                return
+
+            ds = get_drive_service()
+            if not ds:
+                self._send_json(503, {"error": "Drive service not available"})
+                return
+
+            try:
+                meta = ds.get_file_metadata(file_id)
+                self._send_json(200, {"success": True, "metadata": meta})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         # Google Drive file streaming (all files served via Drive API)
@@ -975,9 +1624,11 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     self._safe_send_error(503, hint)
                 return
 
-            # NOTE: We route through local /drive/files endpoint so auth/token handling remains centralized.
-            source_url = f"http://127.0.0.1:{PORT}/drive/files/{file_id}"
-            compat_force_reencode = os.environ.get("PLATZI_COMPAT_FORCE_REENCODE", "0").strip() == "1"
+            # Use raw source here to avoid nested remux inside /drive/files.
+            source_url = f"http://127.0.0.1:{PORT}/drive/files/{file_id}?raw=1"
+            # Default to full re-encode for maximum playback stability across
+            # Chrome/Opera/WebView (VLC-like behavior for damaged timestamps).
+            compat_force_reencode = os.environ.get("PLATZI_COMPAT_FORCE_REENCODE", "1").strip() == "1"
 
             ffmpeg_cmd = [
                 ffmpeg_executable,
@@ -985,11 +1636,9 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 "-loglevel",
                 "error",
                 "-fflags",
-                "+genpts+discardcorrupt",
+                "+genpts+igndts+discardcorrupt",
                 "-avoid_negative_ts",
                 "make_zero",
-                "-max_interleave_delta",
-                "0",
                 "-i",
                 source_url,
                 "-map",
@@ -1007,6 +1656,12 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                         "veryfast",
                         "-pix_fmt",
                         "yuv420p",
+                        "-g",
+                        "48",
+                        "-keyint_min",
+                        "48",
+                        "-sc_threshold",
+                        "0",
                     ]
                 )
             else:
@@ -1019,13 +1674,9 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     "-ar",
                     "48000",
                     "-af",
-                    "aresample=async=1:first_pts=0",
+                    "aresample=async=1:min_hard_comp=0.100:first_pts=0",
                     "-movflags",
                     "+frag_keyframe+empty_moov+default_base_moof",
-                    "-muxdelay",
-                    "0",
-                    "-muxpreload",
-                    "0",
                     "-f",
                     "mp4",
                     "-",
@@ -1039,6 +1690,7 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     bufsize=0,
+                    creationflags=CREATE_NO_WINDOW
                 )
 
                 self.send_response(200)
@@ -1122,7 +1774,9 @@ class PlatziHandler(SimpleHTTPRequestHandler):
             return
 
         if self.path.startswith("/drive/files/"):
-            file_id = unquote(self.path[13:])
+            parsed_url = urlparse(self.path)
+            file_id = unquote(parsed_url.path[13:])
+            query_raw = "raw=1" in (parsed_url.query or "")
 
             if file_id.startswith("local:"):
                 self.send_error(
@@ -1148,9 +1802,29 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     self._safe_send_error(503, hint)
                 return
 
-            try:
-                range_header = self.headers.get("Range")
+            range_header = self.headers.get("Range")
+            ffmpeg_executable = _get_ffmpeg_executable()
+            initial_remux_enabled = os.environ.get("PLATZI_DRIVE_INITIAL_REMUX", "0").strip() == "1"
+            should_try_initial_remux = (ffmpeg_executable and initial_remux_enabled and not range_header and not query_raw)
 
+            # ── FFmpeg remux path for video files ──
+            # When we have ffmpeg available and request is startup/full content,
+            # pipe the video through ffmpeg to re-encode audio and fix timestamp
+            # alignment (same fix VLC applies internally).
+            # We detect video by trying to get file metadata first.
+            if ffmpeg_executable and should_try_initial_remux:
+                try:
+                    file_meta = ds.get_file_metadata(file_id)
+                    mime_from_meta = (file_meta or {}).get("mimeType", "") if isinstance(file_meta, dict) else ""
+                except Exception:
+                    mime_from_meta = ""
+
+                if mime_from_meta.startswith("video"):
+                    self._stream_video_via_ffmpeg(file_id, ffmpeg_executable)
+                    return
+
+            # ── Raw streaming path (non-video files, Range requests, no ffmpeg, ?raw=1) ──
+            try:
                 if range_header:
                     sanitized_range = str(range_header).strip()
                     if "," in sanitized_range or not re.match(r"^bytes=\d*-\d*$", sanitized_range):
@@ -1181,7 +1855,6 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 start_time = time.time()
                 total_bytes = 0
                 try:
-                    # Optimización: Aumentar buffer a 1MB para reducir overhead y mejorar A/V sync
                     for chunk in resp.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             self.wfile.write(chunk)
@@ -1191,7 +1864,6 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                         raise
                 finally:
                     duration = time.time() - start_time
-                    # Loguear métricas de streaming para detectar cuellos de botella
                     if duration > 0.5:
                         speed = (total_bytes / 1024 / 1024) / duration
                         print(
@@ -1215,6 +1887,106 @@ class PlatziHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        if self.path.startswith("/api/repair/"):
+            if not self._is_local_client():
+                self._send_json(403, {"error": "forbidden"})
+                return
+
+            file_id = unquote(self.path[len("/api/repair/") :]).strip()
+            if not file_id or not DRIVE_ID_RE.match(file_id):
+                self._send_json(400, {"error": "invalid_file_id"})
+                return
+
+            ffmpeg_executable = _get_ffmpeg_executable()
+            if not ffmpeg_executable:
+                self._send_json(503, {"error": "ffmpeg_not_available"})
+                return
+
+            ds = get_drive_service()
+            if not ds:
+                self._send_json(503, {"error": "drive_not_available", "detail": get_drive_service_error()})
+                return
+
+            artifact_path, meta_path, lock_path = _repair_paths(file_id)
+            if not _is_within_directory(artifact_path, REPAIRED_VIDEOS_DIR):
+                self._send_json(400, {"error": "invalid_file_path"})
+                return
+
+            os.makedirs(REPAIRED_VIDEOS_DIR, exist_ok=True)
+
+            if _is_artifact_ready(file_id):
+                entry = _set_repair_state(
+                    file_id,
+                    status="completed",
+                    completedAt=_now_iso(),
+                    updatedAt=_now_iso(),
+                    progress=1.0,
+                    error=None,
+                    artifactPath=f"repaired_videos/{file_id}.mp4",
+                    artifactSize=os.path.getsize(artifact_path),
+                    ffmpegMode="remux_audio",
+                )
+                entry["artifactUrl"] = f"/api/repaired/{file_id}"
+                self._send_json(200, entry)
+                return
+
+            now_epoch = time.time()
+            if os.path.exists(lock_path):
+                try:
+                    age = now_epoch - os.path.getmtime(lock_path)
+                except OSError:
+                    age = REPAIR_LOCK_TTL_SECONDS + 1
+                if age <= REPAIR_LOCK_TTL_SECONDS:
+                    self._send_json(409, {"error": "repair_in_progress", "status": "in_progress"})
+                    return
+                try:
+                    os.remove(lock_path)
+                except OSError:
+                    pass
+
+            with repair_state_lock:
+                running = active_repairs.get(file_id)
+                if running and running.is_alive():
+                    self._send_json(409, {"error": "repair_in_progress", "status": "in_progress"})
+                    return
+
+            # Remove stale partial outputs before a new attempt.
+            try:
+                os.remove(artifact_path)
+            except OSError:
+                pass
+            try:
+                os.remove(meta_path)
+            except OSError:
+                pass
+
+            try:
+                with open(lock_path, "w", encoding="utf-8") as lock_file:
+                    lock_file.write(json.dumps({"pid": os.getpid(), "at": _now_iso()}))
+            except OSError as error:
+                self._send_json(507, {"error": "cannot_create_lock", "detail": str(error)})
+                return
+
+            entry = _set_repair_state(
+                file_id,
+                status="pending",
+                requestedAt=_now_iso(),
+                updatedAt=_now_iso(),
+                progress=0.0,
+                error=None,
+                artifactPath=f"repaired_videos/{file_id}.mp4",
+                artifactSize=0,
+                ffmpegMode="pending",
+            )
+
+            worker = threading.Thread(target=_repair_worker, args=(file_id, self.server.server_port), daemon=True)
+            with repair_state_lock:
+                active_repairs[file_id] = worker
+            worker.start()
+
+            self._send_json(202, entry)
+            return
+
         # Guardar progreso en JSON
         if self.path == "/api/progress":
             content_length = int(self.headers.get("Content-Length", 0))
@@ -1230,7 +2002,11 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                 parsed = json.loads(post_data.decode("utf-8"))
                 if not isinstance(parsed, dict):
                     raise ValueError("progress payload must be a JSON object")
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+                self._send_json(400, {"error": str(error)})
+                return
 
+            try:
                 # Guardar en archivo
                 progress_dir = os.path.dirname(PROGRESS_FILE)
                 if progress_dir:
@@ -1239,8 +2015,8 @@ class PlatziHandler(SimpleHTTPRequestHandler):
                     f.write(post_data)
 
                 self._send_json(200, {"status": "saved"})
-            except Exception as e:
-                self._send_json(400, {"error": str(e)})
+            except OSError as error:
+                self._send_json(400, {"error": str(error)})
             return
 
         # Abrir en reproductor externo (VLC)
@@ -1341,6 +2117,7 @@ def main():
 
 def create_server(host=BIND_HOST, port=PORT):
     init_cache()
+    _init_repair_system()
     return ThreadingHTTPServer((host, port), PlatziHandler)
 
 

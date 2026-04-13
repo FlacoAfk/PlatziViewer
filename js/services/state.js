@@ -13,8 +13,13 @@ class StateService {
 
     async init() {
         this.initWarnings = [];
-        // Carga inicial ligera
-        this.coursesData = await ApiService.getBootstrap();
+        // Detect ffmpeg availability in parallel with bootstrap load.
+        // This must complete BEFORE player views request video URLs.
+        const [bootstrapData] = await Promise.all([
+            ApiService.getBootstrap(),
+            ApiService.detectFfmpeg(),
+        ]);
+        this.coursesData = bootstrapData;
 
         const localProgress = this.loadLocalProgress();
         const serverProgress = await this.loadServerProgress();

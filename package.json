@@ -3,13 +3,15 @@
   "version": "1.0.1",
   "description": "Plataforma web para visualizar y organizar cursos de Platzi de manera local",
   "main": "index.html",
+  "type": "module",
   "scripts": {
     "dev": "python server.py",
     "build": "echo 'No build process needed for static files'",
-    "lint": "echo 'Lint tooling removed for shared runtime build'",
-    "lint:fix": "echo 'Lint tooling removed for shared runtime build'",
-    "format": "echo 'Format tooling removed for shared runtime build'",
-    "test": "echo 'Tests not implemented yet'",
+    "test": "python tools/run_with_repo_python.py -m pytest -q",
+    "test:frontend:smoke": "node tests/js_smoke_runner.mjs",
+    "lint": "python tools/run_with_repo_python.py -m ruff check . && npx --yes eslint@8.57.1 js --ext .js && npx --yes stylelint@16.16.0 \"*.css\" \"css/**/*.css\"",
+    "lint:fix": "python tools/run_with_repo_python.py -m ruff check . --fix && npx --yes eslint@8.57.1 js --ext .js --fix && npx --yes stylelint@16.16.0 \"*.css\" \"css/**/*.css\" --fix",
+    "format": "python tools/run_with_repo_python.py -m ruff format .",
     "serve": "python -m http.server 8080 --directory .",
     "start": "python server.py"
   },
@@ -37,31 +39,9 @@
     "url": "https://github.com/tu-usuario/platzi-viewer/issues"
   },
   "homepage": "https://github.com/tu-usuario/platzi-viewer#readme",
-  "devDependencies": {},
-  "eslintConfig": {
-    "env": {
-      "browser": true,
-      "es2021": true,
-      "node": true
-    },
-    "extends": "eslint:recommended",
-    "parserOptions": {
-      "ecmaVersion": 2021,
-      "sourceType": "module"
-    },
-    "rules": {
-      "no-console": "warn",
-      "no-unused-vars": "error",
-      "prefer-const": "error",
-      "no-var": "error"
-    }
-  },
-  "prettier": {
-    "semi": true,
-    "trailingComma": "es5",
-    "singleQuote": true,
-    "printWidth": 100,
-    "tabWidth": 2
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "stylelint": "^16.16.0"
   },
   "browserslist": [
     "> 1%",
